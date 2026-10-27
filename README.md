@@ -90,7 +90,7 @@ FLeak/
 │   ├── mlp.py            # small MLP (100 -> 32 -> 1, outputs a logit)
 │   └── __init__.py       # build_model("logreg" | "mlp", n_features)
 ├── centralized/
-│   └── run.py            # centralized baseline on pooled training data (stub)
+│   └── run.py            # centralized baseline: pooled training, early stopping, 5 seeds
 ├── federated/
 │   ├── pyproject.toml    # Flower app config (imported from the quickstart-pytorch example)
 │   └── client_app.py, server_app.py, custom_strategy.py
@@ -141,6 +141,23 @@ test, nodes = standardize_pooled(test, nodes)          # centralized; or standar
 ```
 
 `utils.dataset.load_processed()` reads the CSVs in `data/processed/` into the same `(test, nodes)` layout (unscaled); it gives the same arrays as `load_cll` + `make_splits` (seed 4171). Use it with `standardize_pooled` / `standardize_local`.
+
+## Running the centralized baseline
+
+```bash
+python -m centralized.run   # run from the repo root
+```
+
+Trains logistic regression (`logreg`) and the small MLP (100 → 32 → 1) on the pooled node training sets (pooled standardization), early-stops on validation AUC (patience 20, max 200 epochs), and evaluates on the shared test set, pooled and per node, over 5 seeds. Seeds vary model initialisation and batch order; the data split is fixed. Hyperparameters (Adam, learning rate 1e-3, weight decay 1e-4, batch size 32) live in `utils/train.py` so the federated run can use the same ones. Results are written to `results/centralized/metrics.csv`.
+
+Results (pooled test set of 140 samples, mean ± std over 5 seeds):
+
+| Model | AUC | Accuracy | F1 | Precision | Recall |
+|---|---|---|---|---|---|
+| Logistic regression | 0.975 ± 0.004 | 0.903 ± 0.015 | 0.904 ± 0.016 | 0.915 ± 0.016 | 0.894 ± 0.030 |
+| MLP | 0.977 ± 0.002 | 0.920 ± 0.013 | 0.921 ± 0.014 | 0.934 ± 0.007 | 0.908 ± 0.027 |
+
+Per-node test AUC (logreg / MLP): DFCI 0.996 / 0.996, GCLLSG 0.910 / 0.920, ICGC 0.997 / 0.998, OTHER 0.914 / 1.000 (OTHER has only 10 test samples).
 
 ## Research referenced
 

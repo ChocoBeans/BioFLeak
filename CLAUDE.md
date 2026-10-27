@@ -29,7 +29,8 @@ annotation ~38 MB into `data/reference/`). `data/` and `results/` are gitignored
 - `models/logistic_regression.py`, `models/mlp.py` — the two models (raw-logit output, train with
   `BCEWithLogitsLoss`); `models.build_model("logreg" | "mlp", n_features)` builds either. Logistic
   regression is the main model; the MLP is the comparison.
-- `centralized/run.py` — centralized baseline (stub).
+- `centralized/run.py` — centralized baseline (`python -m centralized.run`), writes `results/centralized/metrics.csv`.
+  Shared hyperparameters (`LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `SEEDS`) are in `utils/train.py`; reuse them in the federated run.
 - `federated/{client_app,server_app,custom_strategy}.py` + `federated/pyproject.toml` — imported
   Flower quickstart-pytorch example (CIFAR-10 CNN, FedAdagrad, W&B logging), only the import paths and
   the `pyproject.toml` component paths changed (`pytorchexample.` -> `federated.`). It is a template:
@@ -67,11 +68,13 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   log2(TPM+1) values).
 - Models written in PyTorch (so Flower, Opacus and the attacks can reuse them): logistic regression
   and a small MLP, one file each in `models/`. An earlier single-file attempt was removed.
+- Centralized baseline done (`centralized/run.py`, 5 seeds, early stopping on val AUC). Pooled test AUC:
+  logreg 0.975 ± 0.004, MLP 0.977 ± 0.002; accuracy 0.903 / 0.920. Weakest node: GCLLSG (AUC ~0.91-0.92);
+  OTHER has only 10 test samples. These are the numbers FedAvg has to be compared against.
 - Project scaffold created: `models/`, `centralized/`, `federated/` (renamed from `fl/`), plus
   `utils/train.py` and `utils/dataset.py` (shared training/evaluation and the CSV reader, smoke-tested). README and DATA_NOTES are up to date with the above.
 
 ### To do
-- Centralized baseline (`centralized/run.py`) on pooled training data, evaluated on the shared test set (pooled and per node).
 - FedAvg with Flower (`federated/`) across the 4 nodes (same model, same test set, local standardization).
 - Metrics: AUC-ROC primary; also accuracy, F1, precision, recall; pooled and per node; mean ± std
   over seeds.

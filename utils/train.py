@@ -3,8 +3,12 @@ import torch
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from torch import nn
 
+# Shared by the centralized and federated runs so the comparison is like for like.
+LR, WEIGHT_DECAY, BATCH_SIZE = 1e-3, 1e-4, 32
+SEEDS = range(5)  # vary model initialisation and batch order; the data split is fixed
 
-def train_epoch(model, X, y, optimizer, batch_size=32, generator=None):
+
+def train_epoch(model, X, y, optimizer, batch_size=BATCH_SIZE, generator=None):
     """One shuffled pass over (X, y); returns the mean training loss."""
     model.train()
     X, y = torch.as_tensor(X), torch.as_tensor(y, dtype=torch.float32)
