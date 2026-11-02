@@ -29,8 +29,11 @@ annotation ~38 MB into `data/reference/`). `data/` and `results/` are gitignored
 - `models/logistic_regression.py`, `models/mlp.py` — the two models (raw-logit output, train with
   `BCEWithLogitsLoss`); `models.build_model("logreg" | "mlp", n_features)` builds either. Logistic
   regression is the main model; the MLP is the comparison.
-- `centralized/run.py` — centralized baseline (`python -m centralized.run`), writes `results/centralized/metrics.csv`.
-  Shared hyperparameters (`LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `SEEDS`) are in `utils/train.py`; reuse them in the federated run.
+- `centralized/run.py` — centralized baseline (`python -m centralized.run`), writes `results/centralized/metrics.csv` and per-epoch curves in
+  `results/centralized/epochs/` (same columns as `results/federated/rounds/`, `epoch` vs `round`). Trains all
+  200 epochs, then picks the epoch with `utils.train.select_best` (early stopping, patience 20, shared with
+  the federated run). Shared hyperparameters (`LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `SEEDS`, `PATIENCE`) are in
+  `utils/train.py`.
 - `federated/` — FedAvg with Flower (`python -m federated.run`, writes `results/federated/metrics.csv`
   and per-round curves in `results/federated/rounds/`):
   - `client_app.py` — one client per node (partition-id -> sorted node names); trains and validates on
@@ -76,7 +79,7 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   log2(TPM+1) values).
 - Models written in PyTorch (so Flower, Opacus and the attacks can reuse them): logistic regression
   and a small MLP, one file each in `models/`. An earlier single-file attempt was removed.
-- Centralized baseline done (`centralized/run.py`, 5 seeds, early stopping on val AUC). Pooled test AUC:
+- Centralized baseline done (`centralized/run.py`, 5 seeds, epoch picked by early stopping on val AUC, per-epoch curves logged). Pooled test AUC:
   logreg 0.975 ± 0.004, MLP 0.977 ± 0.002; accuracy 0.903 / 0.920. Weakest node: GCLLSG (AUC ~0.91-0.92);
   OTHER has only 10 test samples. These are the numbers FedAvg has to be compared against.
 - Federated baseline done (`federated/`, FedAvg, 4 nodes, Adam, 1 local epoch, same hyperparameters and

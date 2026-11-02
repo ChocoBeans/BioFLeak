@@ -91,7 +91,7 @@ FLeak/
 │   ├── mlp.py            # small MLP (100 -> 32 -> 1, outputs a logit)
 │   └── __init__.py       # build_model("logreg" | "mlp", n_features)
 ├── centralized/
-│   └── run.py            # centralized baseline: pooled training, early stopping, 5 seeds
+│   └── run.py            # centralized baseline: pooled training, per-epoch curves, early-stopping selection, 5 seeds
 ├── federated/
 │   ├── client_app.py     # Flower client: one per node, local training/validation
 │   ├── server_app.py     # FedAvg, client-side validation + server-side test each round
@@ -150,7 +150,7 @@ test, nodes = standardize_pooled(test, nodes)          # centralized; or standar
 python -m centralized.run   # run from the repo root
 ```
 
-Trains logistic regression (`logreg`) and the small MLP (100 → 32 → 1) on the pooled node training sets (pooled standardization), early-stops on validation AUC (patience 20, max 200 epochs), and evaluates on the shared test set, pooled and per node, over 5 seeds. Seeds vary model initialisation and batch order; the data split is fixed. Hyperparameters (Adam, learning rate 1e-3, weight decay 1e-4, batch size 32) live in `utils/train.py` so the federated run can use the same ones. Results are written to `results/centralized/metrics.csv`.
+Trains logistic regression (`logreg`) and the small MLP (100 → 32 → 1) on the pooled node training sets (pooled standardization), trains for 200 epochs while logging the pooled validation metrics and the test metrics (pooled and per node) at every epoch, and then picks the epoch by early stopping on the pooled validation AUC (patience 20, `utils.train.select_best`, the same rule the federated run uses), never from test numbers, over 5 seeds. Seeds vary model initialisation and batch order; the data split is fixed. Hyperparameters (Adam, learning rate 1e-3, weight decay 1e-4, batch size 32) live in `utils/train.py` so the federated run can use the same ones. Results are written to `results/centralized/metrics.csv`, and the per-epoch curves to `results/centralized/epochs/<model>_s<seed>.csv`. These have the same columns as the federated per-round files in `results/federated/rounds/` (`epoch` instead of `round`), so convergence can be plotted side by side, in epochs for centralized and in rounds for federated. The two units are not equivalent: a round averages four separately trained local models.
 
 Results (pooled test set of 140 samples, mean ± std over 5 seeds):
 

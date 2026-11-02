@@ -17,22 +17,11 @@ from federated.client_app import app as client_app
 from federated.server_app import DEFAULTS, make_server_app, run_tag
 from utils.dataset import load_processed
 from utils.preprocess import ROOT
-from utils.train import SEEDS
+from utils.train import PATIENCE, SEEDS, select_best
 
 MODELS = ("logreg", "mlp")
-MAX_ROUNDS, PATIENCE = 200, 20  # same budget and patience as the centralized run
+MAX_ROUNDS = 200  # same budget as the centralized run (PATIENCE is shared in utils.train)
 METRICS = ["auc", "accuracy", "f1", "precision", "recall"]
-
-
-def select_round(val_auc, patience=PATIENCE):
-    """Round (1-based) chosen by early stopping on the client-side validation AUC series."""
-    best, best_round = -1.0, 0
-    for r, auc in enumerate(val_auc, start=1):
-        if auc > best:
-            best, best_round = auc, r
-        elif r - best_round >= patience:
-            break
-    return best_round
 
 
 def main():
@@ -58,7 +47,7 @@ def main():
             run_simulation(server_app=make_server_app(cfg), client_app=client_app,
                            num_supernodes=len(nodes))
             rounds = pd.read_csv(f"{DEFAULTS['out-dir']}/{run_tag({**DEFAULTS, **cfg})}.csv")
-            best = select_round(rounds["val_auc"].tolist())
+            best = select_best(rounds["val_auc"].tolist())
             row = rounds[rounds["round"] == best].iloc[0]
             for split, n in n_of.items():
                 rows.append({"model": model, "seed": seed, "split": split, "n": n, "best_round": best,

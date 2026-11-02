@@ -6,6 +6,22 @@ from torch import nn
 # Shared by the centralized and federated runs so the comparison is like for like.
 LR, WEIGHT_DECAY, BATCH_SIZE = 1e-3, 1e-4, 32
 SEEDS = range(5)  # vary model initialisation and batch order; the data split is fixed
+PATIENCE = 20  # early stopping: stop after this many steps (epochs / rounds) without improvement
+
+
+def select_best(val_auc, patience=PATIENCE):
+    """Step (1-based epoch or round) chosen by early stopping on a validation-AUC series.
+
+    Same result as stopping online: take the best step, and stop once `patience` further steps
+    bring no improvement.
+    """
+    best, best_step = -1.0, 0
+    for step, auc in enumerate(val_auc, start=1):
+        if auc > best:
+            best, best_step = auc, step
+        elif step - best_step >= patience:
+            break
+    return best_step
 
 
 def train_epoch(model, X, y, optimizer, batch_size=BATCH_SIZE, generator=None):
