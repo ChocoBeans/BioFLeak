@@ -1,4 +1,4 @@
-# FLeak
+# BioFLeak
 
 Mini-project: federated learning (FL) on CLL RNA-seq data (cBioPortal `cll_broad_2022`) to test
 (1) whether FL matches centralized performance and (2) how much raw patient data leaks from FL
@@ -23,7 +23,7 @@ GENCODE v19 annotation ~38 MB into `data/reference/`). `data/` and `results/` ar
 ### Setting up on another machine (clone, then rebuild everything that is gitignored)
 
 ```bash
-git clone https://github.com/ChocoBeans/FLeak.git && cd FLeak
+git clone https://github.com/ChocoBeans/BioFLeak.git && cd BioFLeak
 python3 -m venv venv && source venv/bin/activate       # Windows: venv\Scripts\activate
 pip install -r requirements.txt                         # large: torch, ray, jupyter
 python -m utils.preprocess        # ~170 MB downloads, a few minutes; recreates data/

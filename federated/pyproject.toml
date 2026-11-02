@@ -10,9 +10,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "fleak-federated"
+name = "biofleak-federated"
 version = "0.1.0"
-description = "FedAvg over the four CLL cohorts (FLeak)"
+description = "FedAvg over the four CLL cohorts (BioFLeak)"
 license = {file = "LICENSE"}
 dependencies = [
     "flwr[simulation]>=1.39.0,<1.40",

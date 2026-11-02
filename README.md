@@ -1,4 +1,4 @@
-# FLeak
+# BioFLeak
 
 *2026-10-08*
 
@@ -76,7 +76,7 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 ## Project layout
 
 ```
-FLeak/
+BioFLeak/
 ├── data/        # raw, reference and processed CLL data (gitignored)
 │   ├── cll_broad_2022/   # raw cBioPortal download
 │   ├── reference/        # GENCODE v19 gene annotation (downloaded on first run)
