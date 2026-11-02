@@ -46,6 +46,8 @@ annotation ~38 MB into `data/reference/`). `data/` and `results/` are gitignored
     (minutes each) and its copy of the app cannot import `utils/` or `models/`. The simulation uses
     `flwr.simulation.run_simulation` (deprecated in Flower 1.39 but works) with config sent in messages.
   - Needs `ray` (in `requirements.txt` via `flwr[simulation]`). Run from the repo root with the venv active.
+    Flower is pinned to the tested line (`>=1.39.0,<1.40`): an unpinned fresh install pulls 1.42, whose
+    API was not tested here. Re-test the federated run before widening the range.
 - `attacks/`, `notebooks/` — empty so far. Results go to `results/centralized/` and `results/federated/`.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 

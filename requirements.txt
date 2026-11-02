@@ -1,4 +1,4 @@
-flwr[simulation]>=1.36.0
+flwr[simulation]>=1.39.0,<1.40
 torch>=2.2.0
 opacus>=1.4.0
 numpy>=1.26.0

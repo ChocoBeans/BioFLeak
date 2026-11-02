@@ -15,7 +15,7 @@ version = "0.1.0"
 description = "FedAvg over the four CLL cohorts (FLeak)"
 license = {file = "LICENSE"}
 dependencies = [
-    "flwr[simulation]>=1.36.0",
+    "flwr[simulation]>=1.39.0,<1.40",
     "torch>=2.2.0",
     "numpy>=1.26.0",
     "pandas>=2.2.0",
