@@ -181,6 +181,14 @@ Pooled test set (140 samples, mean ± std over 5 seeds):
 
 Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Most of the lower pooled AUC comes from local standardization, not from federation: the centralized models trained with local scaling get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
 
+## Convergence plot
+
+```bash
+python -m utils.plot_convergence   # needs results/centralized/epochs/ and results/federated/rounds/
+```
+
+Writes `results/figures/convergence.png` (validation and test AUC against epochs for centralized and rounds for FedAvg, mean ± 1 std over 5 seeds, log-scale x-axis, test row zoomed to 0.90–1.0) and the plotted numbers in `results/figures/convergence_table.csv`. FedAvg needs more steps to learn (logistic regression reaches test AUC 0.95 after about 17 rounds versus 6 epochs centralized) and plateaus about 0.01 to 0.02 AUC lower. Validation AUC is not defined the same way in the two settings: pooled for centralized, the node-size-weighted mean of per-node AUCs for FedAvg.
+
 ## Research referenced
 
 - [Efficacy of federated learning on genomic data: a study on the UK Biobank and the 1000 Genomes Project](https://pmc.ncbi.nlm.nih.gov/articles/PMC10937521/) — FL applicability for phenotype and ancestry prediction; shows federated models approach centralized performance despite inter-node heterogeneity.
