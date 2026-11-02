@@ -1,33 +1,26 @@
+# Dependencies of the federated app (keep in sync with ../requirements.txt).
+#
+# The simulation is launched in-process by `python -m federated.run` (flwr.simulation.run_simulation),
+# not with `flwr run`: `flwr run` installs a private copy of the app into ~/.flwr and builds a fresh
+# Python environment for every run (minutes each), and that copy cannot import ../utils or ../models.
+# Hyperparameters therefore travel in the per-round config messages (see server_app.py), and the
+# Flower app/federation sections of the original quickstart example were removed.
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "quickstart-pytorch"
-version = "1.1.13"
-description = "Federated Learning with PyTorch and Flower (Quickstart Example)"
+name = "fleak-federated"
+version = "0.1.0"
+description = "FedAvg over the four CLL cohorts (FLeak)"
 license = {file = "LICENSE"}
 dependencies = [
     "flwr[simulation]>=1.36.0",
-    "torch>=2.2.0"
+    "torch>=2.2.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "scikit-learn>=1.4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-
-[tool.flwr.app]
-publisher = "flwrlabs"
-fab-format-version = 1
-flwr-version-target = "1.36.0"
-
-[tool.flwr.app.components]
-serverapp = "federated.server_app:app"
-clientapp = "federated.client_app:app"
-
-[tool.flwr.app.config]
-num-server-rounds = 3
-fraction-evaluate = 1.0
-local-epochs = 1
-learning-rate = 0.1
-batch-size = 32
-save-model = false

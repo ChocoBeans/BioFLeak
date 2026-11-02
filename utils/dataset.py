@@ -9,8 +9,8 @@ _ID_COLUMNS = 5  # SAMPLE_ID, PATIENT_ID, COHORT, NODE, label; the gene columns 
 
 def _read(path):
     df = pd.read_csv(path)
-    return (df.iloc[:, _ID_COLUMNS:].to_numpy(dtype=np.float32),
-            df["label"].to_numpy(dtype=np.int64), df["NODE"].to_numpy())
+    return (df.iloc[:, _ID_COLUMNS:].to_numpy(dtype=np.float32, copy=True),
+            df["label"].to_numpy(dtype=np.int64, copy=True), df["NODE"].to_numpy())
 
 
 def load_processed():

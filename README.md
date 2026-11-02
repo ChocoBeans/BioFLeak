@@ -69,7 +69,8 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 - [x] Preprocess data into per-node train/val splits and a shared test set (`python -m utils.preprocess`)
 - [ ] Confirm cohort split has enough patients per node for stable training (4 nodes; the smallest, OTHER, has 34 train samples (30 patients), 8 val and 10 test)
 - [ ] Pick final feature set size (top-N variance genes; try N = 50 / 100 / 500)
-- [ ] Choose Flower setup for server-side gradient interception needed for the attack
+- [x] FedAvg baseline with Flower (`python -m federated.run`)
+- [ ] Per-client update access on the server for the attacks (SGD, 1 local step, small batches)
 - [ ] Frame for week 7 proposal: two research questions — (1) does FL match centralized performance for cancer classification across institutional silos, and (2) how much raw patient data leaks from FL updates, and what's the cost of closing that leak
 
 ## Project layout
@@ -92,10 +93,11 @@ FLeak/
 ├── centralized/
 │   └── run.py            # centralized baseline: pooled training, early stopping, 5 seeds
 ├── federated/
-│   ├── pyproject.toml    # Flower app config (imported from the quickstart-pytorch example)
-│   └── client_app.py, server_app.py, custom_strategy.py
-│                         # imported Flower quickstart example (still import the removed CIFAR task.py, to be adapted
-│                         # to models/ and utils/); custom_strategy.py is kept for reference only
+│   ├── client_app.py     # Flower client: one per node, local training/validation
+│   ├── server_app.py     # FedAvg, client-side validation + server-side test each round
+│   ├── run.py            # driver: models x seeds, round selection, results/federated/metrics.csv
+│   ├── custom_strategy.py  # imported Flower example, kept for reference only (unused)
+│   └── pyproject.toml, LICENSE  # dependency list from the Flower example
 ├── attacks/     # gradient inversion and membership inference attack implementations
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
 ├── notebooks/   # exploratory analysis
@@ -158,6 +160,26 @@ Results (pooled test set of 140 samples, mean ± std over 5 seeds):
 | MLP | 0.977 ± 0.002 | 0.920 ± 0.013 | 0.921 ± 0.014 | 0.934 ± 0.007 | 0.908 ± 0.027 |
 
 Per-node test AUC (logreg / MLP): DFCI 0.996 / 0.996, GCLLSG 0.910 / 0.920, ICGC 0.997 / 0.998, OTHER 0.914 / 1.000 (OTHER has only 10 test samples).
+
+## Running the federated baseline
+
+```bash
+source venv/bin/activate     # Flower's simulation needs the venv on PATH
+python -m federated.run      # run from the repo root
+```
+
+Simulates FedAvg across the four nodes with Flower (`flwr.simulation.run_simulation`, in-process; `flwr run` is not used because it builds a separate environment for every run). Same models, Adam settings (learning rate 1e-3, weight decay 1e-4, batch size 32) and seeds as the centralized run, 1 local epoch per round, at most 200 rounds, and each client standardizes with its own training statistics. Validation stays at the clients: every round Flower averages the clients' validation metrics (weighted by node size), and the round is chosen by early stopping (patience 20) on that average validation AUC, never on test numbers. The shared test set is held by the server for evaluation only and scored each round, pooled and per node. Per-round curves are in `results/federated/rounds/`; the summary is in `results/federated/metrics.csv` (same columns as the centralized file, plus `best_round`, optimizer, local epochs and batch size). Options: `--optimizer adam|sgd`, `--local-epochs`, `--batch-size`, `--rounds`, `--seeds`, `--models`. A full run takes about 15 to 20 minutes.
+
+Pooled test set (140 samples, mean ± std over 5 seeds):
+
+| Model | Setting | AUC | Accuracy | F1 |
+|---|---|---|---|---|
+| Logistic regression | centralized | 0.975 ± 0.004 | 0.903 ± 0.015 | 0.904 ± 0.016 |
+| Logistic regression | FedAvg | 0.954 ± 0.010 | 0.909 ± 0.037 | 0.912 ± 0.037 |
+| MLP | centralized | 0.977 ± 0.002 | 0.920 ± 0.013 | 0.921 ± 0.014 |
+| MLP | FedAvg | 0.963 ± 0.005 | 0.921 ± 0.020 | 0.925 ± 0.019 |
+
+Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Most of the lower pooled AUC comes from local standardization, not from federation: the centralized models trained with local scaling get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
 
 ## Research referenced
 

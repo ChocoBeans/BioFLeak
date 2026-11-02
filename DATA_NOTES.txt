@@ -112,8 +112,11 @@ Seed:    4171 (SEED in utils/preprocess.py)
      0.97 with pooled scaling and 0.95 with local scaling, so the task is learnable.
 
 LIMITATIONS
-   - Centralized and federated runs use different standardization, so a small part of any
-     performance gap reflects preprocessing, not federation itself. Local statistics from the
+   - Centralized and federated runs use different standardization, so part of any performance gap
+     reflects preprocessing, not federation itself. Measured: pooled test AUC is 0.975 (logreg) and
+     0.977 (MLP) with pooled scaling, 0.965 and 0.960 with local scaling in a centralized run, and
+     0.954 and 0.963 with FedAvg; the pooled gap is mostly the scaling, because scores from
+     differently scaled nodes are less comparable across nodes (per-node AUCs barely change). Local statistics from the
      smallest node ("OTHER", 34 training samples) are noisy.
    - Variance-based gene selection uses all 700 samples (no labels). It is label-free but not
      strictly restricted to training data.

@@ -1,76 +1,84 @@
-"""pytorchexample: A Flower / PyTorch app."""
+"""Flower ServerApp: FedAvg over the CLL nodes.
 
+Each round it logs (a) the client-side validation metrics, weighted-averaged by Flower, and
+(b) the global model's score on the shared test set, pooled and per node (server-side, evaluation
+only). Per-round results go to results/federated/rounds/<tag>.csv; federated/run.py picks the
+round from the client-side validation AUC, never from the test numbers.
+"""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))  # utils/ and models/ live at the repo root
+
+import pandas as pd
 import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
-from flwr.serverapp.strategy import FedAvg, FedAdagrad
-from federated.custom_strategy import CustomFedAdagrad
+from flwr.serverapp.strategy import FedAvg
 
-from federated.task import Net, load_centralized_dataset, test
+from models import build_model
+from utils.dataset import load_processed
+from utils.standardization import standardize_local
+from utils.train import BATCH_SIZE, LR, WEIGHT_DECAY, evaluate
 
-from datetime import datetime
-from pathlib import Path
-
-# Create ServerApp
-app = ServerApp()
-
-
-@app.main()
-def main(grid: Grid, context: Context) -> None:
-    """Main entry point for the ServerApp."""
-
-    # Read run config
-    fraction_evaluate: float = context.run_config["fraction-evaluate"]
-    num_rounds: int = context.run_config["num-server-rounds"]
-    lr: float = context.run_config["learning-rate"]
-
-    # Load global model
-    global_model = Net()
-    arrays = ArrayRecord(global_model.state_dict())
-
-    # Initialize FedAvg/FedAdagrad/CustomFedAdagrad strategy
-    strategy = CustomFedAdagrad(fraction_evaluate=fraction_evaluate)
-    
-    # Get the current date and time
-    current_time = datetime.now()
-    run_dir = current_time.strftime("%Y-%m-%d/%H-%M-%S")
-    # Save path is based on the current directory
-    save_path = Path.cwd() / f"outputs/{run_dir}"
-    save_path.mkdir(parents=True, exist_ok=False)
-
-    # Set the path where results and model checkpoints will be saved
-    strategy.set_save_path(save_path)
-
-    # Start strategy, run FedAvg for `num_rounds`
-    result = strategy.start(
-        grid=grid,
-        initial_arrays=arrays,
-        train_config=ConfigRecord({"lr": lr}),
-        num_rounds=num_rounds,
-        evaluate_fn=global_evaluate,
-    )
-
-    if context.run_config["save-model"]:
-        # Save final model to disk
-        print("\nSaving final model to disk...")
-        state_dict = result.arrays.to_torch_state_dict()
-        torch.save(state_dict, "final_model.pt")
+DEFAULTS = {"model": "logreg", "seed": 0, "optimizer": "adam", "local-epochs": 1,
+            "learning-rate": LR, "weight-decay": WEIGHT_DECAY, "batch-size": BATCH_SIZE,
+            "num-server-rounds": 200, "out-dir": str(ROOT / "results" / "federated" / "rounds")}
 
 
-def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
-    """Evaluate model on central data."""
+def run_tag(cfg):
+    return (f"{cfg['model']}_{cfg['optimizer']}_e{cfg['local-epochs']}_b{cfg['batch-size']}"
+            f"_s{cfg['seed']}")
 
-    # Load the model and initialize it with the received weights
-    model = Net()
-    model.load_state_dict(arrays.to_torch_state_dict())
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
-    # Load entire test set
-    test_dataloader = load_centralized_dataset()
+def run_fedavg(grid: Grid, cfg: dict) -> None:
+    # Simulation shortcut: the held-out test set is stored server-side for evaluation only, and
+    # each test patient is scaled with their own cohort's training statistics.
+    test, nodes = standardize_local(*load_processed())
+    X_test, y_test, node_of = test
+    names = sorted(nodes)
 
-    # Evaluate the global model on the test set
-    test_loss, test_acc = test(model, test_dataloader, device)
+    def test_metrics(server_round: int, arrays: ArrayRecord) -> MetricRecord:
+        model = build_model(cfg["model"], X_test.shape[1])
+        model.load_state_dict(arrays.to_torch_state_dict())
+        out = {}
+        for split, mask in {"pooled": slice(None), **{n: node_of == n for n in names}}.items():
+            for k, v in evaluate(model, X_test[mask], y_test[mask]).items():
+                out[f"test_{split}_{k}"] = float(v)
+        return MetricRecord(out)
 
-    # Return the evaluation metrics
-    return MetricRecord({"accuracy": test_acc, "loss": test_loss})
+    torch.manual_seed(cfg["seed"])
+    initial = ArrayRecord(build_model(cfg["model"], X_test.shape[1]).state_dict())
+    strategy = FedAvg(min_train_nodes=len(names), min_evaluate_nodes=len(names),
+                      min_available_nodes=len(names))
+    train_config = ConfigRecord({
+        "model": cfg["model"], "optimizer": cfg["optimizer"], "local-epochs": cfg["local-epochs"],
+        "lr": cfg["learning-rate"], "weight-decay": cfg["weight-decay"],
+        "batch-size": cfg["batch-size"], "seed": cfg["seed"]})
+    result = strategy.start(grid=grid, initial_arrays=initial, num_rounds=cfg["num-server-rounds"],
+                            train_config=train_config,
+                            evaluate_config=ConfigRecord({"model": cfg["model"]}),
+                            evaluate_fn=test_metrics)
+
+    rows = []
+    for r in range(1, cfg["num-server-rounds"] + 1):
+        row = {"round": r}
+        for source in (result.train_metrics_clientapp, result.evaluate_metrics_clientapp,
+                       result.evaluate_metrics_serverapp):
+            row.update(dict(source.get(r, {})))
+        rows.append(row)
+    out = Path(cfg["out-dir"])
+    out.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(out / f"{run_tag(cfg)}.csv", index=False)
+
+
+def make_server_app(cfg: dict | None = None) -> ServerApp:
+    """A ServerApp that runs FedAvg with `cfg` (missing keys fall back to DEFAULTS)."""
+    app = ServerApp()
+
+    @app.main()
+    def main(grid: Grid, context: Context) -> None:
+        run_fedavg(grid, {**DEFAULTS, **(cfg or dict(context.run_config))})
+
+    return app

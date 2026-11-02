@@ -31,21 +31,27 @@ annotation ~38 MB into `data/reference/`). `data/` and `results/` are gitignored
   regression is the main model; the MLP is the comparison.
 - `centralized/run.py` — centralized baseline (`python -m centralized.run`), writes `results/centralized/metrics.csv`.
   Shared hyperparameters (`LR`, `WEIGHT_DECAY`, `BATCH_SIZE`, `SEEDS`) are in `utils/train.py`; reuse them in the federated run.
-- `federated/{client_app,server_app,custom_strategy}.py` + `federated/pyproject.toml` — imported
-  Flower quickstart-pytorch example (CIFAR-10 CNN, FedAdagrad, W&B logging), only the import paths and
-  the `pyproject.toml` component paths changed (`pytorchexample.` -> `federated.`). It is a template:
-  it still uses CIFAR-10. `custom_strategy.py` is kept for reference only (unrelated to the project for
-  now; edit it later when deeper into the project). The earlier stub files `client.py`, `strategy.py`,
-  `run.py` and the CIFAR `task.py` were deleted (its role is now `models/`, `utils/dataset.py`, `utils/train.py`). `flwr[simulation]` and `torch` are in `requirements.txt` and match `federated/pyproject.toml`; keep
-  the two in sync. The vision/W&B packages (`flwr-datasets`, `torchvision`, `wandb`) were left out
-  on purpose (no CNNs). `client_app.py` and `server_app.py` still import the deleted `task.py` and
-  `custom_strategy.py` imports `wandb`, so none of them import until adapted.
-- `attacks/`, `notebooks/`, `results/` — empty so far. Results go to `results/centralized/` and `results/federated/`.
+- `federated/` — FedAvg with Flower (`python -m federated.run`, writes `results/federated/metrics.csv`
+  and per-round curves in `results/federated/rounds/`):
+  - `client_app.py` — one client per node (partition-id -> sorted node names); trains and validates on
+    its own node only, local standardization; hyperparameters arrive in the per-round config message.
+  - `server_app.py` — FedAvg; logs the client-side validation metrics (Flower's weighted average) and
+    a server-side test evaluation (pooled and per node) each round; `make_server_app(cfg)`.
+  - `run.py` — driver: models x seeds, picks the round from client-side validation AUC (patience 20,
+    same as centralized), never from test numbers. Options: `--optimizer adam|sgd`, `--local-epochs`,
+    `--batch-size` (attack runs: sgd, 1 epoch, small batches).
+  - `custom_strategy.py` — kept for reference only (imported Flower example, imports `wandb`, unused).
+  - `pyproject.toml` / `LICENSE` — dependency list from the Flower example (Apache-2.0); keep in sync
+    with `requirements.txt`. `flwr run` is NOT used: it builds a private environment per run
+    (minutes each) and its copy of the app cannot import `utils/` or `models/`. The simulation uses
+    `flwr.simulation.run_simulation` (deprecated in Flower 1.39 but works) with config sent in messages.
+  - Needs `ray` (in `requirements.txt` via `flwr[simulation]`). Run from the repo root with the venv active.
+- `attacks/`, `notebooks/` — empty so far. Results go to `results/centralized/` and `results/federated/`.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 
 Dependency direction: `utils` <- `models` <- `centralized`, `federated`, `attacks`. `centralized` and
 `federated` must not import each other; both use the same `utils.train` and the same hyperparameters.
-Run modules from the repo root (`python -m centralized.run`); the Flower app in `federated/` is launched with `flwr run`.
+Run modules from the repo root with the venv active (`python -m centralized.run`, `python -m federated.run`).
 
 In code: `from utils.preprocess import load_cll, make_splits` and
 `from utils.standardization import standardize_pooled, standardize_local`. `utils.dataset.load_processed()`
@@ -71,11 +77,14 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
 - Centralized baseline done (`centralized/run.py`, 5 seeds, early stopping on val AUC). Pooled test AUC:
   logreg 0.975 ± 0.004, MLP 0.977 ± 0.002; accuracy 0.903 / 0.920. Weakest node: GCLLSG (AUC ~0.91-0.92);
   OTHER has only 10 test samples. These are the numbers FedAvg has to be compared against.
+- Federated baseline done (`federated/`, FedAvg, 4 nodes, Adam, 1 local epoch, same hyperparameters and
+  seeds as centralized). Pooled test AUC: logreg 0.954 ± 0.010, MLP 0.963 ± 0.005 (centralized 0.975 /
+  0.977); per-node AUCs match centralized closely. Most of the pooled gap is local standardization, not
+  federation: centralized trained with local scaling gets logreg 0.965 / MLP 0.960.
 - Project scaffold created: `models/`, `centralized/`, `federated/` (renamed from `fl/`), plus
   `utils/train.py` and `utils/dataset.py` (shared training/evaluation and the CSV reader, smoke-tested). README and DATA_NOTES are up to date with the above.
 
 ### To do
-- FedAvg with Flower (`federated/`) across the 4 nodes (same model, same test set, local standardization).
 - Metrics: AUC-ROC primary; also accuracy, F1, precision, recall; pooled and per node; mean ± std
   over seeds.
 - Attacks in `attacks/`: gradient inversion (cosine similarity of reconstruction) and membership

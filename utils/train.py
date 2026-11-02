@@ -29,6 +29,13 @@ def predict_proba(model, X):
     return torch.sigmoid(model(torch.as_tensor(X))).numpy()
 
 
+@torch.no_grad()
+def loss_on(model, X, y):
+    """Mean binary cross-entropy of the model on (X, y)."""
+    model.eval()
+    return nn.BCEWithLogitsLoss()(model(torch.as_tensor(X)), torch.as_tensor(y, dtype=torch.float32)).item()
+
+
 def evaluate(model, X, y, threshold=0.5):
     """AUC-ROC plus accuracy, F1, precision and recall (IGHV-mutated = positive class)."""
     p = predict_proba(model, X)
