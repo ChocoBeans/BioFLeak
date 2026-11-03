@@ -24,6 +24,31 @@ def select_best(val_auc, patience=PATIENCE):
     return best_step
 
 
+def batch_generator(seed, server_round, partition_id):
+    """Per-client, per-round RNG for batch order; the attacks recompute it to know the true batches."""
+    return torch.Generator().manual_seed(seed * 1_000_003 + server_round * 101 + partition_id)
+
+
+def sample_batches(n, steps, batch_size, generator=None):
+    """Index tensors of `steps` mini-batches, each drawn without replacement from range(n)."""
+    return [torch.randperm(n, generator=generator)[:batch_size] for _ in range(steps)]
+
+
+def train_steps(model, X, y, optimizer, steps, batch_size, generator=None):
+    """`steps` optimizer steps on random mini-batches (one step with plain SGD = -lr * gradient)."""
+    model.train()
+    X, y = torch.as_tensor(X), torch.as_tensor(y, dtype=torch.float32)
+    loss_fn = nn.BCEWithLogitsLoss()
+    total = 0.0
+    for idx in sample_batches(len(X), steps, batch_size, generator):
+        optimizer.zero_grad()
+        loss = loss_fn(model(X[idx]), y[idx])
+        loss.backward()
+        optimizer.step()
+        total += loss.item()
+    return total / steps
+
+
 def train_epoch(model, X, y, optimizer, batch_size=BATCH_SIZE, generator=None):
     """One shuffled pass over (X, y); returns the mean training loss."""
     model.train()

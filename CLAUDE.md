@@ -69,7 +69,6 @@ python -m utils.plot_convergence  # results/figures/convergence.png
   - `run.py` — driver: models x seeds, picks the round from client-side validation AUC (patience 20,
     same as centralized), never from test numbers. Options: `--optimizer adam|sgd`, `--local-epochs`,
     `--batch-size` (attack runs: sgd, 1 epoch, small batches).
-  - `custom_strategy.py` — kept for reference only (imported Flower example, imports `wandb`, unused).
   - `pyproject.toml` / `LICENSE` — dependency list from the Flower example (Apache-2.0); keep in sync
     with `requirements.txt`. `flwr run` is NOT used: it builds a private environment per run
     (minutes each) and its copy of the app cannot import `utils/` or `models/`. The simulation uses
@@ -79,7 +78,15 @@ python -m utils.plot_convergence  # results/figures/convergence.png
     API was not tested here. Re-test the federated run before widening the range.
 - `utils/plot_convergence.py` — `python -m utils.plot_convergence` -> `results/figures/convergence.png` (+ table CSV):
   centralized epochs vs FedAvg rounds, validation and test AUC, from the per-epoch / per-round files.
-- `attacks/`, `notebooks/` — empty so far. Results go to `results/centralized/` and `results/federated/`.
+- `federated/capture_strategy.py` — `CaptureFedAvg`: FedAvg that records the global model and each client's individual
+  update per round (the honest-but-curious server). Enabled with `capture=True` in the server config.
+  `--local-steps N` (config `local-steps`, in `utils.train.train_steps`): N mini-batch steps per round instead of
+  full epochs; with plain SGD and N=1 the update is exactly `-lr * gradient`. Baseline run tags are unchanged.
+- `attacks/` — `run_capture.py` (`python -m attacks.run_capture`: logreg/mlp x batch size 1,2,4,8 x seeds 0-2, SGD lr 0.1,
+  1 step, 100 rounds -> `results/attacks/captures/*.npz`), `inversion.py` (closed form + DLG gradient matching),
+  `run_inversion.py` (scores against the true batches, recomputed from the seeded generators ->
+  `results/attacks/inversion.csv`). Membership inference and defenses not built yet.
+- `notebooks/` — empty so far.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 
 Dependency direction: `utils` <- `models` <- `centralized`, `federated`, `attacks`. `centralized` and
@@ -119,21 +126,25 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
 - Project scaffold created: `models/`, `centralized/`, `federated/` (renamed from `fl/`), plus
   `utils/train.py` and `utils/dataset.py` (shared training/evaluation and the CSV reader, smoke-tested). README and DATA_NOTES are up to date with the above.
 
-### To do (next: attacks)
+- Gradient inversion done (`attacks/`, 3 seeds, 100 rounds, 4 clients). Batch size 1: closed form recovers the
+  sample exactly for logreg and MLP (cosine 1.000, all 2,400 updates; chance about 0). Batch size > 1: DLG gradient
+  matching is near chance for logreg (cosine 0.18-0.26) and partial for the MLP (0.68 / 0.58 / 0.54 at B = 2 / 4 / 8);
+  these are lower bounds (fixed optimizer budget; DLG also degrades at later rounds, e.g. B=1 logreg 1.00 -> 0.2-0.3).
+
+### To do (next: membership inference, then defenses)
 Settled design, from the discussion so far:
 - **Main model: logistic regression; MLP as the comparison** (leakage vs capacity). FedAvg is the
   method; the attacked runs use the same FedAvg code with `--optimizer sgd --local-epochs 1` and a
   small batch (1-8) so each client update is essentially one gradient (`-lr * gradient`). Adam hides
   gradient magnitudes (its first step is ~sign), so do not attack Adam updates.
 - **Threat model: honest-but-curious server** that reads each client's individual update before
-  averaging. Capture it by subclassing Flower's `FedAvg` and overriding `aggregate_train(server_round,
-  replies)` (the example `federated/custom_strategy.py` shows how a strategy is customised; it is unused
-  reference code that imports `wandb`). `federated/server_app.py` currently uses plain `FedAvg`.
+  averaging. Captured by `federated/capture_strategy.py` (`CaptureFedAvg`, a `FedAvg` subclass overriding
+  `configure_train` / `aggregate_train`); `federated/server_app.py` uses it only when `capture=True`, else plain `FedAvg`.
 - **Gradient inversion** (`attacks/`): for logistic regression with batch size 1, `grad_w = (p - y) * x`
   and `grad_b = p - y`, so `x = grad_w / grad_b` exactly. With batch B > 1 it is an average (not unique),
   so use gradient matching (DLG-style) and report how success drops with B. Metric: cosine similarity
   between reconstructed and true feature vector (in the client's locally standardized space; mapping back
-  to log2(TPM+1) needs the node's mean/std, state that as attacker knowledge). The MLP has no closed form.
+  to log2(TPM+1) needs the node's mean/std, state that as attacker knowledge). The MLP also has an exact closed form at batch size 1: `x = grad_W1[j] / grad_b1[j]` for an active hidden unit j (an earlier note saying it has none was wrong).
 - **Membership inference**: counted per patient (4 patients have two samples, all in OTHER's train set).
   Members = a node's train patients; non-members = that node's val/test patients. Metric: attack AUC
   (0.5 = guessing).

@@ -70,7 +70,9 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 - [ ] Confirm cohort split has enough patients per node for stable training (4 nodes; the smallest, OTHER, has 34 train samples (30 patients), 8 val and 10 test)
 - [ ] Pick final feature set size (top-N variance genes; try N = 50 / 100 / 500)
 - [x] FedAvg baseline with Flower (`python -m federated.run`)
-- [ ] Per-client update access on the server for the attacks (SGD, 1 local step, small batches)
+- [x] Per-client update access on the server for the attacks (SGD, 1 local step, small batches): `federated/capture_strategy.py`, `python -m attacks.run_capture`
+- [x] Gradient inversion (`python -m attacks.run_inversion`); exact at batch size 1 (cosine 1.000), near chance for logistic regression at batch size 2-8, partial for the MLP (0.54-0.68)
+- [ ] Membership inference, then DP and secure aggregation
 - [ ] Frame for week 7 proposal: two research questions — (1) does FL match centralized performance for cancer classification across institutional silos, and (2) how much raw patient data leaks from FL updates, and what's the cost of closing that leak
 
 ## Project layout
@@ -96,9 +98,9 @@ BioFLeak/
 │   ├── client_app.py     # Flower client: one per node, local training/validation
 │   ├── server_app.py     # FedAvg, client-side validation + server-side test each round
 │   ├── run.py            # driver: models x seeds, round selection, results/federated/metrics.csv
-│   ├── custom_strategy.py  # imported Flower example, kept for reference only (unused)
+│   ├── capture_strategy.py  # CaptureFedAvg: records each client's update for the attacks
 │   └── pyproject.toml, LICENSE  # dependency list from the Flower example
-├── attacks/     # gradient inversion and membership inference attack implementations
+├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion); membership inference to come
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
 ├── notebooks/   # exploratory analysis
 ├── DATA_NOTES.txt  # data selection and preprocessing decisions, with reasoning

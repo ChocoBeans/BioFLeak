@@ -2,6 +2,7 @@
 
 Each client standardizes with the statistics of its own training data (utils.standardization).
 Hyperparameters arrive in the per-round config message sent by the server.
+With `local-steps` > 0 a round is that many mini-batch steps (attack runs) instead of full epochs.
 """
 import sys
 from functools import lru_cache
@@ -16,7 +17,7 @@ from flwr.clientapp import ClientApp
 from models import build_model
 from utils.dataset import load_processed
 from utils.standardization import standardize_local
-from utils.train import evaluate, loss_on, train_epoch
+from utils.train import batch_generator, evaluate, loss_on, train_epoch, train_steps
 
 app = ClientApp()
 
@@ -48,11 +49,16 @@ def train(msg: Message, context: Context):
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight-decay"])
     else:  # plain SGD: one local step then equals -lr * gradient (used for the attack runs)
         optimizer = torch.optim.SGD(model.parameters(), lr=cfg["lr"])
-    generator = torch.Generator().manual_seed(
-        cfg["seed"] * 1_000_003 + cfg["server-round"] * 101 + int(context.node_config["partition-id"]))
-    losses = [train_epoch(model, X, y, optimizer, cfg["batch-size"], generator)
-              for _ in range(cfg["local-epochs"])]
+    partition = int(context.node_config["partition-id"])
+    generator = batch_generator(cfg["seed"], cfg["server-round"], partition)
+    if cfg["local-steps"] > 0:  # attack runs: a fixed number of batch steps instead of full epochs
+        losses = [train_steps(model, X, y, optimizer, cfg["local-steps"], cfg["batch-size"], generator)]
+    else:
+        losses = [train_epoch(model, X, y, optimizer, cfg["batch-size"], generator)
+                  for _ in range(cfg["local-epochs"])]
     metrics = {"train_loss": sum(losses) / len(losses), "num-examples": len(y)}
+    if cfg["capture"]:  # lets the capturing server file this update under its node
+        metrics["partition-id"] = partition
     content = RecordDict({"arrays": ArrayRecord(model.state_dict()), "metrics": MetricRecord(metrics)})
     return Message(content=content, reply_to=msg)
 
