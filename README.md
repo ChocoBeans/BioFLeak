@@ -72,7 +72,7 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 - [x] FedAvg baseline with Flower (`python -m federated.run`)
 - [x] Per-client update access on the server for the attacks (SGD, 1 local step, small batches): `federated/capture_strategy.py`, `python -m attacks.run_capture`
 - [x] Gradient inversion (`python -m attacks.run_inversion`); exact at batch size 1 (cosine 1.000), near chance for logistic regression at batch size 2-8, partial for the MLP (0.54-0.68)
-- [x] Membership inference (`python -m attacks.run_capture --membership`, `python -m attacks.run_membership`): global-model loss attack at chance (AUC 0.50); per-node update-gain attack modest (pooled 0.57-0.59 at the early-stopped round)
+- [x] Membership inference (scored inside `python -m defenses.run_dp_membership` and `defenses.run_secagg`, on the SGD 50-round runs): both loss-threshold attacks near chance (pooled AUC 0.50-0.53, intervals include 0.5), with and without DP and secure aggregation
 - [x] DP (`python -m defenses.run_dp`, `defenses.run_dp_membership`, `attacks.run_inversion --epsilons`) and simulated secure aggregation (`defenses.run_secagg`); trade-off plot `python -m defenses.plot_tradeoff`: DP is nearly free down to epsilon 3 for logistic regression, removes batch-1 inversion at every epsilon tested (1, 3, 8); secure aggregation hides individual updates (inversion and the update-gain membership attack fall to chance) but the 4-client aggregate still leaks partially for the MLP
 - [ ] Frame for week 7 proposal: two research questions — (1) does FL match centralized performance for cancer classification across institutional silos, and (2) how much raw patient data leaks from FL updates, and what's the cost of closing that leak
 
@@ -101,7 +101,7 @@ BioFLeak/
 │   ├── run.py            # driver: models x seeds, round selection, results/federated/metrics.csv
 │   ├── capture_strategy.py  # CaptureFedAvg: records each client's update for the attacks
 │   └── pyproject.toml, LICENSE  # dependency list from the Flower example
-├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion), membership.py + run_membership.py (membership inference)
+├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion), membership.py + run_membership.py (membership scoring, called by the defenses)
 ├── defenses/    # run_dp.py, tune_lr.py, run_dp_membership.py, run_secagg.py, plot_tradeoff.py (DP and secure aggregation)
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
 ├── tests/       # pytest: closed form exact, masks cancel, no patient in two splits
@@ -197,7 +197,8 @@ Writes `results/figures/convergence.png` (validation and test AUC against epochs
 ## Uncertainty (paired bootstrap)
 
 ```bash
-python -m utils.uncertainty     # needs both centralized runs, the federated baseline and the captures; -> results/uncertainty.csv
+python -m attacks.run_capture --baseline   # Part 1 Adam captures (5 seeds, 200 rounds, about 10 minutes); nothing is attacked, utils.uncertainty rebuilds the FedAvg predictions from them
+python -m utils.uncertainty     # needs both centralized runs (centralized.run, centralized.run --scaling local), the federated baseline, the Part 1 captures and defenses.run_dp; -> results/uncertainty.csv
 python -m pytest tests          # quick checks: closed form exact, masks cancel, no patient in two splits
 ```
 
@@ -224,12 +225,11 @@ Everything below runs from the repo root with the venv active, after `utils.prep
 python -m attacks.run_capture      # logreg/mlp x batch size 1,2,4,8 x 3 seeds -> results/attacks/captures/*.npz
 python -m attacks.run_inversion    # -> results/attacks/inversion.csv, cosine similarity table
 
-# Membership inference: record the baseline Adam runs (5 seeds, 200 rounds), then attack
-python -m attacks.run_capture --membership   # about 10 minutes
-python -m attacks.run_membership             # -> results/attacks/membership.csv
+# Membership inference has no script of its own: defenses.run_dp records the SGD 50-round runs and
+# defenses.run_dp_membership / defenses.run_secagg score them (see "Running the defenses")
 ```
 
-`attacks/run_capture.py` launches the Flower simulations; `federated/capture_strategy.py` (`CaptureFedAvg`) is the honest-but-curious server that records each client's update inside them. The `run_inversion` and `run_membership` scripts only read those recordings. With one plain-SGD step an update is exactly `-lr * gradient`, so batch size 1 gives the closed form `x = grad_w / grad_b` (logistic regression) or `x = grad_W1[j] / grad_b1[j]` (MLP, any active hidden unit j). The true batches are recomputed from the seeded generators (`utils.train.batch_generator`) and are used only to score the attack.
+`attacks/run_capture.py` launches the Flower simulations; `federated/capture_strategy.py` (`CaptureFedAvg`) is the honest-but-curious server that records each client's update inside them. The `run_inversion` script only reads those recordings. With one plain-SGD step an update is exactly `-lr * gradient`, so batch size 1 gives the closed form `x = grad_w / grad_b` (logistic regression) or `x = grad_W1[j] / grad_b1[j]` (MLP, any active hidden unit j). The true batches are recomputed from the seeded generators (`utils.train.batch_generator`) and are used only to score the attack.
 
 ## Running the defenses
 
@@ -241,15 +241,15 @@ python -m defenses.run_dp_membership # membership attack on those captures -> re
 python -m attacks.run_capture --batch-sizes --dp-epsilons 1 3 8 --rounds 50   # batch-size-1 DP captures
 python -m attacks.run_inversion --epsilons 0 1 3 8 --batch-sizes 1 --dlg-rounds 1 10 50   # -> results/attacks/inversion_dp.csv
 
-# Secure aggregation (simulated pairwise masks; needs the captures from attacks.run_capture,
-# attacks.run_capture --membership and defenses.run_dp)
+# Secure aggregation (simulated pairwise masks; needs the captures from attacks.run_capture
+# and defenses.run_dp)
 python -m defenses.run_secagg        # -> results/defenses/secagg.csv, secagg_membership.csv
 
 # Privacy-utility figure
 python -m defenses.plot_tradeoff     # -> results/figures/privacy_utility.png and privacy_utility_table.csv
 ```
 
-Order that works from scratch: `utils.preprocess`, `centralized.run`, `federated.run`, `attacks.run_capture`, `attacks.run_inversion`, `attacks.run_capture --membership`, `attacks.run_membership`, `defenses.run_dp`, `defenses.run_dp_membership`, the DP inversion pair above, `defenses.run_secagg`, `defenses.plot_tradeoff`.
+Order that works from scratch: `utils.preprocess`, `centralized.run`, `federated.run`, `attacks.run_capture`, `attacks.run_inversion`, `defenses.run_dp`, `defenses.run_dp_membership`, the DP inversion pair above, `defenses.run_secagg`, `defenses.plot_tradeoff`, then `centralized.run --scaling local`, `attacks.run_capture --baseline` and `utils.uncertainty` for the intervals.
 
 The learning-rate grid (`defenses.tune_lr`, `results/defenses/lr_tuning.csv`; logreg, 2 seeds, mean validation AUC at epsilon 8 / no DP: lr 0.02 0.955 / 0.959, 0.1 0.955 / 0.964, 0.5 0.941 / 0.966) ties 0.02 at epsilon 8 and is within 0.002 of the best without DP, so 0.1 is a compromise, not a clear winner. Tuning on validation data is not charged to epsilon, so the reported guarantee covers the training runs, not the choice of learning rate. 
 
@@ -294,7 +294,7 @@ What it shows:
 - Without a defense, a server that sees individual updates recovers a batch-size-1 patient exactly (both models). This is a worst case, not a typical one: one SGD step on one sample, plain updates. Larger batches blur it (logistic regression near chance, the MLP partial), and updates from several local steps or a full epoch (the Part 1 protocol) were not attacked, so read 1.000 as an upper bound on what this attack achieves, and the batch 2-8 numbers as lower bounds (fixed optimizer budget).
 - DP removes that inversion at every epsilon tested and costs almost nothing in AUC down to epsilon 3; epsilon 1 hurts, the MLP most. The same epsilon is the same per-site guarantee for the inversion runs (batch 1) and the performance runs (batch 32), not the same noise per step.
 - Secure aggregation hides individual updates at no utility cost. The masked-update result (cosine about 0) is true by construction (mask std 1.0 against updates of about 0.01), so it is not evidence about the attack. The informative number is the aggregate: four clients with one sample each still leak partially for the MLP (0.63; logistic regression 0.25).
-- AUC near 0.5 means no evidence of membership leakage under these two simple loss-threshold attacks, not proof that none exists (stronger attacks such as shadow models were not run). On this SGD protocol the attack is already near chance without a defense, so no defense shows a measurable effect; do not read the logistic regression epsilon 8 value (0.568) as DP increasing leakage. On the Adam baseline protocol the update-gain attack is modestly above chance at the early-stopped round (pooled 0.568 logistic regression / 0.587 MLP) and secure aggregation brings it to 0.487 / 0.513 (`results/defenses/secagg_membership.csv`). The global-loss attack is at chance everywhere, with or without defenses.
+- AUC near 0.5 means no evidence of membership leakage under these two simple loss-threshold attacks, not proof that none exists (stronger attacks such as shadow models were not run). On this SGD protocol the attack is already near chance without a defense, so no defense shows a measurable effect; do not read the logistic regression epsilon 8 value (0.568) as DP increasing leakage. The global-loss attack is at chance everywhere, with or without defenses.
 - The privacy-utility figure is `results/figures/privacy_utility.png`.
 
 ## Limitations

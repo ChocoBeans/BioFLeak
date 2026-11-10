@@ -33,11 +33,15 @@ python -m utils.plot_convergence  # results/figures/convergence.png
 
 # attacks and defenses (details and what each script reads: README.md, "Running the attacks / defenses")
 python -m attacks.run_capture && python -m attacks.run_inversion          # gradient inversion
-python -m attacks.run_capture --membership && python -m attacks.run_membership   # ~10 min + scoring
 python -m defenses.run_dp && python -m defenses.run_dp_membership         # DP sweep ~25 min
 python -m attacks.run_capture --batch-sizes --dp-epsilons 1 3 8 --rounds 50
 python -m attacks.run_inversion --epsilons 0 1 3 8 --batch-sizes 1 --dlg-rounds 1 10 50
 python -m defenses.run_secagg && python -m defenses.plot_tradeoff
+
+# uncertainty (paired bootstrap over test patients)
+python -m centralized.run --scaling local
+python -m attacks.run_capture --baseline   # ~10 min; Part 1 Adam captures, nothing is attacked
+python -m utils.uncertainty
 ```
 
 - Tested versions: Python 3.12.3, flwr 1.39.0 (pinned `>=1.39.0,<1.40`), torch 2.14.1, ray 2.55.1,
@@ -93,15 +97,15 @@ python -m defenses.run_secagg && python -m defenses.plot_tradeoff
 - `attacks/` — `run_capture.py` (`python -m attacks.run_capture`: logreg/mlp x batch size 1,2,4,8 x seeds 0-2, SGD lr 0.1,
   1 step, 100 rounds -> `results/attacks/captures/*.npz`), `inversion.py` (closed form + DLG gradient matching),
   `run_inversion.py` (scores against the true batches, recomputed from the seeded generators ->
-  `results/attacks/inversion.csv`), `membership.py` + `run_membership.py` (loss-threshold membership inference on the
-  baseline-protocol captures from `python -m attacks.run_capture --membership`: Adam, 1 epoch, batch 32, 200 rounds,
-  5 seeds -> `results/attacks/membership.csv`; `run_membership.membership_table` is reused for the DP runs). `run_capture --dp-epsilons`
+  `results/attacks/inversion.csv`), `membership.py` + `run_membership.py` (loss-threshold membership scoring, a library: `membership_table` is called by
+  `defenses/run_dp_membership.py` and `run_secagg.py` on the SGD 50-round runs). `run_capture --baseline` records the Part 1 Adam
+  baseline (1 epoch, batch 32, 200 rounds, 5 seeds) only for `utils.uncertainty`; nothing is attacked there. `run_capture --dp-epsilons`
   and `run_inversion --epsilons` do the same for inversion under DP (batch size 1 only -> `inversion_dp.csv`).
 - `defenses/` — `utils/dp.py` (client DP-SGD with Opacus: per-sample clip 1.0, Gaussian noise, noise multiplier calibrated per
   client for (epsilon, delta = 1e-5) over the whole run with the RDP accountant; config `dp-epsilon` <= 0 = off, `dp-clip`,
   `dp-delta`); `tune_lr.py` (lr grid on validation AUC -> `lr_tuning.csv`: 0.1 ties 0.02 at eps 8 and is within 0.002 of the best without DP, so a compromise; tuning on validation is not charged to epsilon; writes to `lr_tuning/`); `run_dp.py` (utility sweep, SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf,
   5 seeds, also saves the captures -> `results/defenses/dp_utility.csv`); `run_dp_membership.py`; `run_secagg.py` (pairwise-masked
-  secure aggregation simulation + attacks on a masked update and on the aggregate -> `secagg.csv`; membership under masking, on the Adam and the SGD captures -> `secagg_membership.csv`; needs the batch-size-1 captures, the `--membership` captures and `defenses.run_dp`); `plot_tradeoff.py` ->
+  secure aggregation simulation + attacks on a masked update and on the aggregate -> `secagg.csv`; membership under masking, on the SGD captures -> `secagg_membership.csv`; needs the batch-size-1 captures and `defenses.run_dp`); `plot_tradeoff.py` ->
   `results/figures/privacy_utility.png` + table.
 - `tests/test_core.py` — pytest: closed form exact at B=1, masks cancel, no patient in two splits (`python -m pytest tests`).
 - Run tags omit lr and rounds; `federated/server_app.py` now writes `<tag>.json` (lr, weight decay, rounds, clip, delta) beside each round log and `check_run_config` lets readers fail on a mismatch (used by uncertainty, run_inversion, run_membership, run_secagg; captures also get a sidecar, and older captures are checked from their stored lr and rounds; older round logs have no sidecar and are skipped).
@@ -151,19 +155,15 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   the batch 2-8 numbers are lower bounds, the B=1 result an upper bound (one SGD step, plain update; multi-step/Adam updates were not attacked) (fixed optimizer budget; DLG also degrades at later rounds, e.g. B=1 logreg 1.00 -> 0.2-0.3).
 
 - Membership inference done (loss-threshold, per patient; members = a node's train patients, non-members = its val + test
-  patients; AUC with a bootstrap 95% interval over patients; scores averaged over 5 seeds). Two scores: `global_loss`
-  (-loss under the global model) is at chance (pooled AUC 0.50 for both models, both rounds): no evidence of leakage under this attack (not proof; no shadow-model attack was run). `update_gain`
-  (loss under the global model sent minus loss under node k's returned local model) leaks modestly at the early-stopped
-  round: pooled AUC 0.57 logreg (CI 0.52-0.62) / 0.59 MLP (0.54-0.64), and 0.51 / 0.54 at round 200. Per node it is
-  strongest for the tiny OTHER node at the selected round (logreg 0.77, MLP 0.85, but only 30 members / 18 non-members,
-  and ~0.5 at round 200). DFCI `global_loss` AUC is below 0.5 (members have higher loss, about 0.38-0.42): a
-  distribution difference between DFCI's train and val/test patients, not a leak. 32 per-node intervals, so a few
-  exceed 0.5 by chance.
+  patients; AUC with a bootstrap 95% interval over patients; scores averaged over 5 seeds; scored on the SGD 50-round runs,
+  last round). Two scores: `global_loss` (-loss under the global model) and `update_gain` (loss under the global model sent minus
+  loss under node k's returned local model). Pooled AUC without a defense: global_loss 0.501 / 0.511, update_gain 0.521 / 0.534
+  (logreg / MLP), intervals include 0.5: no evidence of leakage under these attacks (not proof; no shadow-model attack was run).
+  The Adam-protocol membership run was dropped from the write-up; the Adam captures are kept only for `utils.uncertainty`.
 
 - Defenses done. DP (client-level DP-SGD, SGD lr 0.1, 50 rounds, no early stopping since selecting a round on validation data
   would cost privacy budget; the inf reference is non-private SGD with the same settings). Pooled test AUC (mean of 5 seeds):
-  logreg 0.941 / 0.958 / 0.959 / 0.964 and MLP 0.889 (std 0.076) / 0.961 / 0.962 / 0.961 at epsilon 1 / 3 / 8 / inf (Adam baseline is
-  0.954 / 0.963, a different optimizer). So utility is nearly free down to epsilon 3; epsilon 1 hurts, the MLP most and OTHER
+  logreg 0.941 / 0.958 / 0.959 / 0.964 and MLP 0.889 (std 0.076) / 0.961 / 0.962 / 0.961 at epsilon 1 / 3 / 8 / inf. So utility is nearly free down to epsilon 3; epsilon 1 hurts, the MLP most and OTHER
   (34 samples; noise multiplier ~38 at batch 32) per node. Inversion (batch 1, closed form, 3 seeds): cosine 1.000 without DP and
   0.00-0.03 at every epsilon tested (1/3/8), i.e. DP removes it even at epsilon 8. Membership (update gain, pooled): no
   clear leakage to remove under this protocol (non-private SGD 0.52 / 0.53, intervals include 0.5; DP values 0.47-0.57, within
@@ -172,12 +172,10 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   step counts, so the same epsilon is the same per-site guarantee, not the same noise per step.
   Secure aggregation (simulated pairwise masks, cancel to 2e-15): a masked individual update gives inversion cosine ~0 (1.000
   unmasked), but the aggregate of 4 clients with one sample each still leaks partially for the MLP (gradient matching 0.63,
-  chance about 0.17; logreg 0.25, near chance); utility unchanged by construction. Membership under secure aggregation was
-  measured too (weighted updates masked, Adam-baseline captures, `secagg_membership.csv`): global-loss AUC identical to the
-  unmasked run (0.495-0.504), update-gain falls from 0.568 / 0.587 to 0.487 / 0.513 at the selected round (0.51-0.52 / 0.48 at round 200),
-  i.e. chance; the masks cancel to 3e-15. Same test on the SGD 50-round captures (the DP protocol, epsilon = inf): update-gain
-  0.521 / 0.534 plain -> 0.508 / 0.502 masked, global-loss unchanged (0.501 / 0.511); the plain SGD value was already near chance,
-  so there was little to remove. Compare secure aggregation with DP on the SGD rows, not on the Adam ones. Plots: `results/figures/privacy_utility.png`.
+  chance about 0.17; logreg 0.25, near chance); utility unchanged by construction. Membership under secure aggregation (weighted updates masked, SGD 50-round
+  captures, `secagg_membership.csv`; masks cancel to 3e-15): update-gain 0.521 / 0.534 plain -> 0.508 / 0.502 masked, global-loss
+  unchanged (0.501 / 0.511); the plain value was already near chance, so there was little to remove. Compare secure aggregation
+  with DP on these SGD rows. Plots: `results/figures/privacy_utility.png`.
 
 ### To do (next: write-up)
 Settled design, from the discussion so far:
@@ -207,7 +205,7 @@ Settled design, from the discussion so far:
 
 - Reporting structure (user's choice): Part 1 compares centralized vs FL with no defense on the Adam protocol
   (logreg and MLP). Part 2 uses only the SGD protocol for FL with no defense, with DP and with secure
-  aggregation (performance, gradient inversion, membership inference); the Adam membership rows are a footnote.
+  aggregation (performance, gradient inversion, membership inference); membership is scored on the SGD protocol only.
   The two protocols differ in optimizer, round budget and round selection, so do not mix numbers across them.
 
 - Keep the model simple (logistic regression / small MLP) so the attacks stay interpretable.
