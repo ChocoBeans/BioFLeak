@@ -44,11 +44,13 @@ def infer_label(grad):
 
 
 def gradient_matching(model_name, n_features, global_vec, grad, batch_size, steps=500, lr=0.1, seed=0,
-                      label=None):
+                      label=None, weights=None):
     """DLG-style attack: returns a (batch_size, n_features) array of reconstructed samples.
 
     Soft labels are learned unless `label` (a known or inferred hard label, batch size 1) is given;
-    without it x and -x with the opposite label produce the same gradient.
+    without it x and -x with the opposite label produce the same gradient. `weights` (sum 1) are the
+    per-sample weights of the observed gradient (default: the plain batch mean), e.g. the FedAvg weights
+    when the observed gradient is an aggregate over clients.
     """
     model = build_model(model_name, n_features)
     model.load_state_dict({n: torch.as_tensor(global_vec[s].reshape(shape), dtype=torch.float32)
@@ -59,11 +61,12 @@ def gradient_matching(model_name, n_features, global_vec, grad, batch_size, step
     x = torch.randn(batch_size, n_features, generator=generator).requires_grad_()
     y_logit = torch.randn(batch_size, generator=generator).requires_grad_()  # soft label, learned
     opt = torch.optim.Adam([x, y_logit], lr=lr)
-    loss_fn = nn.BCEWithLogitsLoss()
+    w = torch.full((batch_size,), 1.0 / batch_size) if weights is None else torch.as_tensor(weights, dtype=torch.float32)
+    loss_fn = nn.BCEWithLogitsLoss(reduction="none")
     for _ in range(steps):
         opt.zero_grad()
-        loss = loss_fn(model(x), torch.full((batch_size,), label) if label is not None
-                       else torch.sigmoid(y_logit))
+        loss = (w * loss_fn(model(x), torch.full((batch_size,), label) if label is not None
+                            else torch.sigmoid(y_logit))).sum()
         g = torch.cat([t.flatten() for t in torch.autograd.grad(loss, params, create_graph=True)])
         ((g - target) ** 2).sum().backward()
         opt.step()
