@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--seeds", type=int, nargs="*", default=[0, 1, 2])
     parser.add_argument("--rounds", type=int, default=100)
     parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--dp-epsilons", type=float, nargs="*", default=[],
+                        help="also capture the batch-size-1 runs with DP-SGD at these epsilons")
     parser.add_argument("--membership", action="store_true",
                         help="capture the baseline Adam protocol instead (for membership inference)")
     args = parser.parse_args()
@@ -38,11 +40,13 @@ def main():
                        "capture-dir": str(OUT / "captures"), "out-dir": str(OUT / "rounds")}
                 run_simulation(server_app=make_server_app(cfg), client_app=client_app, num_supernodes=4)
         return
+    # no DP (epsilon 0) with the given batch sizes; each DP epsilon only at batch size 1 (the clean case)
+    runs = [(0.0, b) for b in args.batch_sizes] + [(e, 1) for e in args.dp_epsilons]
     for model in args.models:
-        for batch in args.batch_sizes:
+        for eps, batch in runs:
             for seed in args.seeds:
                 cfg = {"model": model, "seed": seed, "optimizer": "sgd", "local-steps": 1,
-                       "batch-size": batch, "learning-rate": args.learning_rate,
+                       "batch-size": batch, "learning-rate": args.learning_rate, "dp-epsilon": eps,
                        "num-server-rounds": args.rounds, "capture": True,
                        "capture-dir": str(OUT / "captures"), "out-dir": str(OUT / "rounds")}
                 run_simulation(server_app=make_server_app(cfg), client_app=client_app, num_supernodes=4)

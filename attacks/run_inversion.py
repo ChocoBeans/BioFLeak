@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--seeds", type=int, nargs="*", default=[0, 1, 2])
     parser.add_argument("--dlg-rounds", type=int, nargs="*", default=[1, 10, 50, 100],
                         help="rounds attacked with gradient matching (the closed form uses every round)")
+    parser.add_argument("--epsilons", type=float, nargs="*", default=[0.0],
+                        help="DP epsilons of the captured runs to attack (0 = no DP; DP runs are batch size 1)")
     parser.add_argument("--dlg-steps", type=int, default=500)
     args = parser.parse_args()
 
@@ -36,11 +38,12 @@ def main():
     names = sorted(nodes)
     n_features = nodes[names[0]]["train"][0].shape[1]
     rows = []
+    runs = [(e, b) for e in args.epsilons for b in ([1] if e > 0 else args.batch_sizes)]
     for model in args.models:
-        for batch in args.batch_sizes:
+        for eps, batch in runs:
             for seed in args.seeds:
                 cfg = {"model": model, "seed": seed, "optimizer": "sgd", "local-epochs": 1,
-                       "local-steps": 1, "batch-size": batch}
+                       "local-steps": 1, "batch-size": batch, "dp-epsilon": eps}
                 cap = np.load(OUT / "captures" / f"{run_tag(cfg)}.npz")
                 lr = float(cap["lr"])
                 rng = np.random.default_rng(seed)
@@ -50,7 +53,7 @@ def main():
                         idx = sample_batches(len(X), 1, batch, batch_generator(seed, int(rnd), c))[0].numpy()
                         truth, grad = X[idx], -cap["delta"][i, c] / lr
                         other = rng.choice(np.setdiff1d(np.arange(len(X)), idx), size=batch, replace=False)
-                        base = {"model": model, "batch_size": batch, "seed": seed, "round": int(rnd),
+                        base = {"model": model, "epsilon": eps, "batch_size": batch, "seed": seed, "round": int(rnd),
                                 "node": node, "chance": matched_cosine(X[other], truth)}
                         if batch == 1:
                             rec = closed_form(model, n_features, grad)
@@ -61,11 +64,11 @@ def main():
                                                     label=infer_label(grad) if batch == 1 else None)
                             rows.append({**base, "method": "gradient_matching",
                                          "cosine": matched_cosine(rec, truth)})
-                print(f"{model} B={batch} seed={seed} done", flush=True)
+                print(f"{model} eps={eps} B={batch} seed={seed} done", flush=True)
     df = pd.DataFrame(rows)
     OUT.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUT / "inversion.csv", index=False)
-    print(df.groupby(["model", "method", "batch_size"])[["cosine", "chance"]].agg(["mean", "std"]).round(3))
+    df.to_csv(OUT / ("inversion.csv" if args.epsilons == [0.0] else "inversion_dp.csv"), index=False)
+    print(df.groupby(["model", "method", "epsilon", "batch_size"])[["cosine", "chance"]].agg(["mean", "std"]).round(3))
 
 
 if __name__ == "__main__":

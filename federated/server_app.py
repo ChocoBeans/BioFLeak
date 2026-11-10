@@ -21,18 +21,20 @@ from federated.capture_strategy import CaptureFedAvg
 from models import build_model
 from utils.dataset import load_processed
 from utils.standardization import standardize_local
+from utils.dp import CLIP, DELTA
 from utils.train import BATCH_SIZE, LR, WEIGHT_DECAY, evaluate
 
 DEFAULTS = {"model": "logreg", "seed": 0, "optimizer": "adam", "local-epochs": 1,
             "learning-rate": LR, "weight-decay": WEIGHT_DECAY, "batch-size": BATCH_SIZE,
-            "local-steps": 0, "capture": False,
+            "local-steps": 0, "capture": False, "dp-epsilon": 0.0, "dp-delta": DELTA, "dp-clip": CLIP,
             "num-server-rounds": 200, "capture-dir": str(ROOT / "results" / "attacks" / "captures"),
             "out-dir": str(ROOT / "results" / "federated" / "rounds")}
 
 
 def run_tag(cfg):
     steps = f"_k{cfg['local-steps']}" if cfg["local-steps"] else ""  # keeps the baseline tags unchanged
-    return (f"{cfg['model']}_{cfg['optimizer']}_e{cfg['local-epochs']}{steps}_b{cfg['batch-size']}"
+    dp = f"_dp{cfg['dp-epsilon']:g}" if cfg["dp-epsilon"] > 0 else ""
+    return (f"{cfg['model']}{dp}_{cfg['optimizer']}_e{cfg['local-epochs']}{steps}_b{cfg['batch-size']}"
             f"_s{cfg['seed']}")
 
 
@@ -59,6 +61,8 @@ def run_fedavg(grid: Grid, cfg: dict) -> None:
     train_config = ConfigRecord({
         "model": cfg["model"], "optimizer": cfg["optimizer"], "local-epochs": cfg["local-epochs"],
         "local-steps": cfg["local-steps"], "capture": cfg["capture"],
+        "dp-epsilon": cfg["dp-epsilon"], "dp-delta": cfg["dp-delta"], "dp-clip": cfg["dp-clip"],
+        "num-server-rounds": cfg["num-server-rounds"],
         "lr": cfg["learning-rate"], "weight-decay": cfg["weight-decay"],
         "batch-size": cfg["batch-size"], "seed": cfg["seed"]})
     result = strategy.start(grid=grid, initial_arrays=initial, num_rounds=cfg["num-server-rounds"],

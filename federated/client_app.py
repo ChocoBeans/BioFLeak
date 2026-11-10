@@ -17,6 +17,7 @@ from flwr.clientapp import ClientApp
 from models import build_model
 from utils.dataset import load_processed
 from utils.standardization import standardize_local
+from utils.dp import local_plan, noise_multiplier, train_steps_dp
 from utils.train import batch_generator, evaluate, loss_on, train_epoch, train_steps
 
 app = ClientApp()
@@ -51,7 +52,12 @@ def train(msg: Message, context: Context):
         optimizer = torch.optim.SGD(model.parameters(), lr=cfg["lr"])
     partition = int(context.node_config["partition-id"])
     generator = batch_generator(cfg["seed"], cfg["server-round"], partition)
-    if cfg["local-steps"] > 0:  # attack runs: a fixed number of batch steps instead of full epochs
+    if cfg["dp-epsilon"] > 0:  # DP-SGD; every client calibrates its own noise to the same (epsilon, delta)
+        batch, steps, _ = local_plan(len(y), cfg["batch-size"], cfg["local-steps"])
+        sigma = noise_multiplier(cfg["dp-epsilon"], cfg["num-server-rounds"], len(y), cfg["batch-size"],
+                                 cfg["local-steps"], cfg["dp-delta"])
+        losses = [train_steps_dp(model, X, y, cfg["lr"], steps, batch, sigma, cfg["dp-clip"], generator)]
+    elif cfg["local-steps"] > 0:  # attack runs: a fixed number of batch steps instead of full epochs
         losses = [train_steps(model, X, y, optimizer, cfg["local-steps"], cfg["batch-size"], generator)]
     else:
         losses = [train_epoch(model, X, y, optimizer, cfg["batch-size"], generator)
