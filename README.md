@@ -72,7 +72,8 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 - [x] FedAvg baseline with Flower (`python -m federated.run`)
 - [x] Per-client update access on the server for the attacks (SGD, 1 local step, small batches): `federated/capture_strategy.py`, `python -m attacks.run_capture`
 - [x] Gradient inversion (`python -m attacks.run_inversion`); exact at batch size 1 (cosine 1.000), near chance for logistic regression at batch size 2-8, partial for the MLP (0.54-0.68)
-- [ ] Membership inference, then DP and secure aggregation
+- [x] Membership inference (`python -m attacks.run_capture --membership`, `python -m attacks.run_membership`): global-model loss attack at chance (AUC 0.50); per-node update-gain attack modest (pooled 0.57-0.59 at the early-stopped round)
+- [ ] DP and secure aggregation
 - [ ] Frame for week 7 proposal: two research questions — (1) does FL match centralized performance for cancer classification across institutional silos, and (2) how much raw patient data leaks from FL updates, and what's the cost of closing that leak
 
 ## Project layout
@@ -100,7 +101,7 @@ BioFLeak/
 │   ├── run.py            # driver: models x seeds, round selection, results/federated/metrics.csv
 │   ├── capture_strategy.py  # CaptureFedAvg: records each client's update for the attacks
 │   └── pyproject.toml, LICENSE  # dependency list from the Flower example
-├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion); membership inference to come
+├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion), membership.py + run_membership.py (membership inference)
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
 ├── notebooks/   # exploratory analysis
 ├── DATA_NOTES.txt  # data selection and preprocessing decisions, with reasoning

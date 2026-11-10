@@ -23,3 +23,11 @@ def load_processed():
     for folder in sorted((PROCESSED_DIR / "nodes").iterdir()):
         nodes[folder.name] = {s: _read(folder / f"{s}.csv")[:2] for s in ("train", "val")}
     return _read(PROCESSED_DIR / "test.csv"), nodes
+
+
+def load_patients():
+    """Patient ids in the same row order as `load_processed`: (test_ids, {node: {split: ids}})."""
+    nodes = {folder.name: {s: pd.read_csv(folder / f"{s}.csv")["PATIENT_ID"].to_numpy()
+                           for s in ("train", "val")}
+             for folder in sorted((PROCESSED_DIR / "nodes").iterdir())}
+    return pd.read_csv(PROCESSED_DIR / "test.csv")["PATIENT_ID"].to_numpy(), nodes

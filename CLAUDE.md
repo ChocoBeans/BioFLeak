@@ -51,7 +51,7 @@ python -m utils.plot_convergence  # results/figures/convergence.png
 - `utils/preprocess.py` — download, join/filter, gene selection, splits, CSV export (`python -m utils.preprocess`).
 - `utils/standardization.py` — `standardize_pooled` / `standardize_local`.
 - `utils/train.py` — shared `train_epoch`, `evaluate` (AUC, accuracy, F1, precision, recall).
-- `utils/dataset.py` — `load_processed()` reads `data/processed/` into `(test, nodes)` (unscaled).
+- `utils/dataset.py` — `load_processed()` reads `data/processed/` into `(test, nodes)` (unscaled); `load_patients()` gives the patient ids in the same row order.
 - `models/logistic_regression.py`, `models/mlp.py` — the two models (raw-logit output, train with
   `BCEWithLogitsLoss`); `models.build_model("logreg" | "mlp", n_features)` builds either. Logistic
   regression is the main model; the MLP is the comparison.
@@ -85,7 +85,9 @@ python -m utils.plot_convergence  # results/figures/convergence.png
 - `attacks/` — `run_capture.py` (`python -m attacks.run_capture`: logreg/mlp x batch size 1,2,4,8 x seeds 0-2, SGD lr 0.1,
   1 step, 100 rounds -> `results/attacks/captures/*.npz`), `inversion.py` (closed form + DLG gradient matching),
   `run_inversion.py` (scores against the true batches, recomputed from the seeded generators ->
-  `results/attacks/inversion.csv`). Membership inference and defenses not built yet.
+  `results/attacks/inversion.csv`), `membership.py` + `run_membership.py` (loss-threshold membership inference on the
+  baseline-protocol captures from `python -m attacks.run_capture --membership`: Adam, 1 epoch, batch 32, 200 rounds,
+  5 seeds -> `results/attacks/membership.csv`). Defenses not built yet.
 - `notebooks/` — empty so far.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 
@@ -131,7 +133,17 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   matching is near chance for logreg (cosine 0.18-0.26) and partial for the MLP (0.68 / 0.58 / 0.54 at B = 2 / 4 / 8);
   these are lower bounds (fixed optimizer budget; DLG also degrades at later rounds, e.g. B=1 logreg 1.00 -> 0.2-0.3).
 
-### To do (next: membership inference, then defenses)
+- Membership inference done (loss-threshold, per patient; members = a node's train patients, non-members = its val + test
+  patients; AUC with a bootstrap 95% interval over patients; scores averaged over 5 seeds). Two scores: `global_loss`
+  (-loss under the global model) is at chance (pooled AUC 0.50 for both models, both rounds), no leakage. `update_gain`
+  (loss under the global model sent minus loss under node k's returned local model) leaks modestly at the early-stopped
+  round: pooled AUC 0.57 logreg (CI 0.52-0.62) / 0.59 MLP (0.54-0.64), and 0.51 / 0.54 at round 200. Per node it is
+  strongest for the tiny OTHER node at the selected round (logreg 0.77, MLP 0.85, but only 30 members / 18 non-members,
+  and ~0.5 at round 200). DFCI `global_loss` AUC is below 0.5 (members have higher loss, about 0.38-0.42): a
+  distribution difference between DFCI's train and val/test patients, not a leak. 32 per-node intervals, so a few
+  exceed 0.5 by chance.
+
+### To do (next: defenses)
 Settled design, from the discussion so far:
 - **Main model: logistic regression; MLP as the comparison** (leakage vs capacity). FedAvg is the
   method; the attacked runs use the same FedAvg code with `--optimizer sgd --local-epochs 1` and a
@@ -145,7 +157,7 @@ Settled design, from the discussion so far:
   so use gradient matching (DLG-style) and report how success drops with B. Metric: cosine similarity
   between reconstructed and true feature vector (in the client's locally standardized space; mapping back
   to log2(TPM+1) needs the node's mean/std, state that as attacker knowledge). The MLP also has an exact closed form at batch size 1: `x = grad_W1[j] / grad_b1[j]` for an active hidden unit j (an earlier note saying it has none was wrong).
-- **Membership inference**: counted per patient (4 patients have two samples, all in OTHER's train set).
+- **Membership inference** (done, see Status): counted per patient (4 patients have two samples, all in OTHER's train set).
   Members = a node's train patients; non-members = that node's val/test patients. Metric: attack AUC
   (0.5 = guessing).
 - **Defenses**: DP via Opacus (epsilon sweep 1, 3, 8, inf; clip + noise on client gradients) and secure
