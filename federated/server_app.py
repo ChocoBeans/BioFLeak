@@ -6,6 +6,7 @@ only). Per-round results go to results/federated/rounds/<tag>.csv; federated/run
 round from the client-side validation AUC, never from the test numbers.
 """
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,25 @@ def run_tag(cfg):
     dp = f"_dp{cfg['dp-epsilon']:g}" if cfg["dp-epsilon"] > 0 else ""
     return (f"{cfg['model']}{dp}_{cfg['optimizer']}_e{cfg['local-epochs']}{steps}_b{cfg['batch-size']}"
             f"_s{cfg['seed']}")
+
+
+SIDECAR_KEYS = ("learning-rate", "weight-decay", "num-server-rounds", "dp-clip", "dp-delta")  # not in run_tag
+
+
+def check_run_config(csv_path, **expected):
+    """Fail if a run's sidecar (<tag>.json, written next to the log) disagrees with `expected`.
+
+    Run tags omit the learning rate and the round budget, so a rerun with other settings overwrites
+    the same file name; readers call this to catch a mismatch. Runs from before the sidecar existed
+    have none and are skipped.
+    """
+    sidecar = Path(csv_path).with_suffix(".json")
+    if not sidecar.exists():
+        return
+    saved = json.loads(sidecar.read_text())
+    bad = {k: (saved.get(k), v) for k, v in expected.items() if saved.get(k) != v}
+    if bad:
+        raise ValueError(f"{sidecar.name}: settings differ from what the reader expects (saved, expected): {bad}")
 
 
 def run_fedavg(grid: Grid, cfg: dict) -> None:
@@ -82,6 +102,7 @@ def run_fedavg(grid: Grid, cfg: dict) -> None:
     out = Path(cfg["out-dir"])
     out.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(out / f"{run_tag(cfg)}.csv", index=False)
+    (out / f"{run_tag(cfg)}.json").write_text(json.dumps({k: cfg[k] for k in SIDECAR_KEYS}))
 
 
 def make_server_app(cfg: dict | None = None) -> ServerApp:
