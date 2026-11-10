@@ -115,9 +115,11 @@ LIMITATIONS
    - Centralized and federated runs use different standardization, so part of any performance gap
      reflects preprocessing, not federation itself. Measured: pooled test AUC is 0.975 (logreg) and
      0.977 (MLP) with pooled scaling, 0.965 and 0.960 with local scaling in a centralized run, and
-     0.954 and 0.963 with FedAvg; the pooled gap is mostly the scaling, because scores from
+     0.954 and 0.963 with FedAvg (reproduce: `python -m centralized.run --scaling local`); the pooled gap is mostly the scaling, because scores from
      differently scaled nodes are less comparable across nodes (per-node AUCs barely change). Local statistics from the
-     smallest node ("OTHER", 34 training samples) are noisy.
+     smallest node ("OTHER", 34 training samples) are noisy. Paired bootstrap over test patients (`python -m utils.uncertainty`): FedAvg minus
+     centralized with local scaling is -0.011 [-0.023, 0.000] (logreg) and +0.002 [-0.006, 0.011] (MLP),
+     i.e. not distinguishable from zero; the 140-sample test set has an AUC standard error of about 0.017.
    - Variance-based gene selection uses all 700 samples (no labels). It is label-free but not
      strictly restricted to training data.
    - Gene classification depends on the GENCODE v19 annotation (needs a download on first run);

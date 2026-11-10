@@ -25,7 +25,7 @@ GENCODE v19 annotation ~38 MB into `data/reference/`). `data/` and `results/` ar
 ```bash
 git clone https://github.com/ChocoBeans/BioFLeak.git && cd BioFLeak
 python3 -m venv venv && source venv/bin/activate       # Windows: venv\Scripts\activate
-pip install -r requirements.txt                         # large: torch, ray, jupyter
+pip install -r requirements.txt                         # large: torch, ray
 python -m utils.preprocess        # ~170 MB downloads, a few minutes; recreates data/
 python -m centralized.run         # ~1.5 min on 16 cores; recreates results/centralized/
 python -m federated.run           # ~15-20 min; recreates results/federated/ (venv must be active)
@@ -99,11 +99,13 @@ python -m defenses.run_secagg && python -m defenses.plot_tradeoff
   and `run_inversion --epsilons` do the same for inversion under DP (batch size 1 only -> `inversion_dp.csv`).
 - `defenses/` — `utils/dp.py` (client DP-SGD with Opacus: per-sample clip 1.0, Gaussian noise, noise multiplier calibrated per
   client for (epsilon, delta = 1e-5) over the whole run with the RDP accountant; config `dp-epsilon` <= 0 = off, `dp-clip`,
-  `dp-delta`); `run_dp.py` (utility sweep, SGD lr 0.1 chosen on validation AUC, batch 32, 50 rounds, epsilon 1/3/8/inf,
+  `dp-delta`); `tune_lr.py` (lr grid on validation AUC -> `lr_tuning.csv`: 0.1 best at eps 8, within 0.002 of best without DP, so a compromise; writes to `lr_tuning/`); `run_dp.py` (utility sweep, SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf,
   5 seeds, also saves the captures -> `results/defenses/dp_utility.csv`); `run_dp_membership.py`; `run_secagg.py` (pairwise-masked
   secure aggregation simulation + attacks on a masked update and on the aggregate -> `secagg.csv`; membership under masking, on the Adam and the SGD captures -> `secagg_membership.csv`; needs the batch-size-1 captures, the `--membership` captures and `defenses.run_dp`); `plot_tradeoff.py` ->
   `results/figures/privacy_utility.png` + table.
-- `notebooks/` — empty so far.
+- `tests/test_core.py` — pytest: closed form exact at B=1, masks cancel, no patient in two splits (`python -m pytest tests`).
+- Run tags omit lr and rounds; `federated/server_app.py` now writes `<tag>.json` (lr, weight decay, rounds, clip, delta) beside each round log and `check_run_config` lets readers fail on a mismatch (older files have none).
+- `utils/uncertainty.py` — paired bootstrap of AUC differences over test patients; FedAvg predictions rebuilt from the captures (checked against logged test AUC); centralized predictions saved by `centralized.run`.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 
 Dependency direction: `utils` <- `models` <- `centralized`, `federated`, `attacks`, `defenses` (`attacks` and `defenses` also use `federated`). `centralized` and
@@ -137,7 +139,7 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
 - Federated baseline done (`federated/`, FedAvg, 4 nodes, Adam, 1 local epoch, same hyperparameters and
   seeds as centralized). Pooled test AUC: logreg 0.954 ± 0.010, MLP 0.963 ± 0.005 (centralized 0.975 /
   0.977); per-node AUCs match centralized closely. Most of the pooled gap is local standardization, not
-  federation: centralized trained with local scaling gets logreg 0.965 / MLP 0.960.
+  federation: centralized trained with local scaling (`centralized.run --scaling local`) gets logreg 0.965 / MLP 0.960. Paired bootstrap (`utils.uncertainty`, `results/uncertainty.csv`): FedAvg minus centralized-local is -0.011 [-0.023, 0.000] / +0.002 [-0.006, 0.011]; minus pooled-scaling centralized -0.020 [-0.045, 0.000] / -0.014 [-0.030, -0.002]. DP eps 3 and 8 vs no DP: not distinguishable from 0; eps 1 clearly worse (-0.023 / -0.072).
 - Convergence plot done (`utils/plot_convergence.py`): FedAvg learns more slowly (logreg reaches test AUC
   0.95 after ~17 rounds vs ~6 epochs) and plateaus 0.01-0.02 below centralized.
 - Project scaffold created: `models/`, `centralized/`, `federated/` (renamed from `fl/`), plus
@@ -146,11 +148,11 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
 - Gradient inversion done (`attacks/`, 3 seeds, 100 rounds, 4 clients). Batch size 1: closed form recovers the
   sample exactly for logreg and MLP (cosine 1.000, all 2,400 updates; chance about 0). Batch size > 1: DLG gradient
   matching is near chance for logreg (cosine 0.18-0.26) and partial for the MLP (0.68 / 0.58 / 0.54 at B = 2 / 4 / 8);
-  these are lower bounds (fixed optimizer budget; DLG also degrades at later rounds, e.g. B=1 logreg 1.00 -> 0.2-0.3).
+  the batch 2-8 numbers are lower bounds, the B=1 result an upper bound (one SGD step, plain update; multi-step/Adam updates were not attacked) (fixed optimizer budget; DLG also degrades at later rounds, e.g. B=1 logreg 1.00 -> 0.2-0.3).
 
 - Membership inference done (loss-threshold, per patient; members = a node's train patients, non-members = its val + test
   patients; AUC with a bootstrap 95% interval over patients; scores averaged over 5 seeds). Two scores: `global_loss`
-  (-loss under the global model) is at chance (pooled AUC 0.50 for both models, both rounds), no leakage. `update_gain`
+  (-loss under the global model) is at chance (pooled AUC 0.50 for both models, both rounds): no evidence of leakage under this attack (not proof; no shadow-model attack was run). `update_gain`
   (loss under the global model sent minus loss under node k's returned local model) leaks modestly at the early-stopped
   round: pooled AUC 0.57 logreg (CI 0.52-0.62) / 0.59 MLP (0.54-0.64), and 0.51 / 0.54 at round 200. Per node it is
   strongest for the tiny OTHER node at the selected round (logreg 0.77, MLP 0.85, but only 30 members / 18 non-members,

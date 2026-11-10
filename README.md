@@ -1,8 +1,8 @@
 # BioFLeak
 
-*2026-10-08*
+*Proposal 2026-10-08; results added through 2026-11-11*
 
-Mini-project proposal: federated learning on Chronic Lymphocytic Leukemia (CLL, Broad, Nat Genet 2022) data via cBioPortal, testing whether FL matches centralized performance and how much raw patient data leaks from FL model updates.
+Mini-project: federated learning on Chronic Lymphocytic Leukemia (CLL, Broad, Nat Genet 2022) data via cBioPortal, testing whether FL matches centralized performance and how much raw patient data leaks from FL model updates.
 
 ## Motivation
 
@@ -102,9 +102,9 @@ BioFLeak/
 │   ├── capture_strategy.py  # CaptureFedAvg: records each client's update for the attacks
 │   └── pyproject.toml, LICENSE  # dependency list from the Flower example
 ├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion), membership.py + run_membership.py (membership inference)
-├── defenses/    # run_dp.py, run_dp_membership.py, run_secagg.py, plot_tradeoff.py (DP and secure aggregation)
+├── defenses/    # run_dp.py, tune_lr.py, run_dp_membership.py, run_secagg.py, plot_tradeoff.py (DP and secure aggregation)
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
-├── notebooks/   # exploratory analysis
+├── tests/       # pytest: closed form exact, masks cancel, no patient in two splits
 ├── DATA_NOTES.txt  # data selection and preprocessing decisions, with reasoning
 ├── requirements.txt
 └── README.md
@@ -151,7 +151,8 @@ test, nodes = standardize_pooled(test, nodes)          # centralized; or standar
 ## Running the centralized baseline
 
 ```bash
-python -m centralized.run   # run from the repo root
+python -m centralized.run                    # run from the repo root
+python -m centralized.run --scaling local    # same, but each node scaled with its own statistics (as FedAvg does); -> results/centralized_local/
 ```
 
 Trains logistic regression (`logreg`) and the small MLP (100 → 32 → 1) on the pooled node training sets (pooled standardization), trains for 200 epochs while logging the pooled validation metrics and the test metrics (pooled and per node) at every epoch, and then picks the epoch by early stopping on the pooled validation AUC (patience 20, `utils.train.select_best`, the same rule the federated run uses), never from test numbers, over 5 seeds. Seeds vary model initialisation and batch order; the data split is fixed. Hyperparameters (Adam, learning rate 1e-3, weight decay 1e-4, batch size 32) live in `utils/train.py` so the federated run can use the same ones. Results are written to `results/centralized/metrics.csv`, and the per-epoch curves to `results/centralized/epochs/<model>_s<seed>.csv`. These have the same columns as the federated per-round files in `results/federated/rounds/` (`epoch` instead of `round`), so convergence can be plotted side by side, in epochs for centralized and in rounds for federated. The two units are not equivalent: a round averages four separately trained local models.
@@ -183,7 +184,7 @@ Pooled test set (140 samples, mean ± std over 5 seeds):
 | MLP | centralized | 0.977 ± 0.002 | 0.920 ± 0.013 | 0.921 ± 0.014 |
 | MLP | FedAvg | 0.963 ± 0.005 | 0.921 ± 0.020 | 0.925 ± 0.019 |
 
-Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Most of the lower pooled AUC comes from local standardization, not from federation: the centralized models trained with local scaling get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
+Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Most of the lower pooled AUC comes from local standardization, not from federation: the centralized models trained with local scaling (`python -m centralized.run --scaling local` -> `results/centralized_local/`) get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
 
 ## Convergence plot
 
@@ -192,6 +193,26 @@ python -m utils.plot_convergence   # needs results/centralized/epochs/ and resul
 ```
 
 Writes `results/figures/convergence.png` (validation and test AUC against epochs for centralized and rounds for FedAvg, mean ± 1 std over 5 seeds, log-scale x-axis, test row zoomed to 0.90–1.0) and the plotted numbers in `results/figures/convergence_table.csv`. FedAvg needs more steps to learn (logistic regression reaches test AUC 0.95 after about 17 rounds versus 6 epochs centralized) and plateaus about 0.01 to 0.02 AUC lower. Validation AUC is not defined the same way in the two settings: pooled for centralized, the node-size-weighted mean of per-node AUCs for FedAvg.
+
+## Uncertainty (paired bootstrap)
+
+```bash
+python -m utils.uncertainty     # needs both centralized runs, the federated baseline and the captures; -> results/uncertainty.csv
+python -m pytest tests          # quick checks: closed form exact, masks cancel, no patient in two splits
+```
+
+The 140-sample test set gives an AUC standard error of about 0.017 at AUC 0.96 (Hanley-McNeil), the same size as the gaps in this study. All setups are scored on the same test patients, so differences are tested with a paired bootstrap: resample test patients (2,000 times), recompute each setup's AUC, average over the 5 seeds, take the 95% interval of the difference. The FedAvg predictions are rebuilt from the saved captures and checked against the logged test AUC. This covers test-set sampling only; one data split and 5 training seeds are still all there is (see Limitations).
+
+| Comparison (pooled test AUC, a - b) | Logistic regression | MLP |
+|---|---|---|
+| FedAvg (Adam) vs centralized, pooled scaling | -0.020 [-0.045, 0.000] | -0.014 [-0.030, -0.002] |
+| FedAvg (Adam) vs centralized, local scaling | -0.011 [-0.023, 0.000] | +0.002 [-0.006, 0.011] |
+| Centralized local vs pooled scaling | -0.010 [-0.035, 0.011] | -0.016 [-0.035, -0.003] |
+| DP epsilon 8 vs no DP (SGD) | -0.005 [-0.016, 0.003] | +0.001 [-0.008, 0.012] |
+| DP epsilon 3 vs no DP (SGD) | -0.006 [-0.017, 0.002] | 0.000 [-0.010, 0.012] |
+| DP epsilon 1 vs no DP (SGD) | -0.023 [-0.038, -0.010] | -0.072 [-0.098, -0.048] |
+
+Reading it: FedAvg is 0.01-0.02 AUC below centralized, but once the centralized run uses local scaling the remaining difference is not distinguishable from zero for either model. DP at epsilon 3-8 is indistinguishable from no DP; epsilon 1 is a real loss.
 
 ## Running the attacks
 
@@ -214,6 +235,7 @@ python -m attacks.run_membership             # -> results/attacks/membership.csv
 
 ```bash
 # Differential privacy (client-level DP-SGD with Opacus; SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf, 5 seeds)
+python -m defenses.tune_lr           # learning-rate grid on validation AUC -> results/defenses/lr_tuning.csv (the choice of lr 0.1)
 python -m defenses.run_dp            # about 25 minutes; utility -> results/defenses/dp_utility.csv; also saves the captures
 python -m defenses.run_dp_membership # membership attack on those captures -> results/defenses/dp_membership.csv
 python -m attacks.run_capture --batch-sizes --dp-epsilons 1 3 8 --rounds 50   # batch-size-1 DP captures
@@ -228,6 +250,8 @@ python -m defenses.plot_tradeoff     # -> results/figures/privacy_utility.png an
 ```
 
 Order that works from scratch: `utils.preprocess`, `centralized.run`, `federated.run`, `attacks.run_capture`, `attacks.run_inversion`, `attacks.run_capture --membership`, `attacks.run_membership`, `defenses.run_dp`, `defenses.run_dp_membership`, the DP inversion pair above, `defenses.run_secagg`, `defenses.plot_tradeoff`.
+
+The learning-rate grid (`defenses.tune_lr`, `results/defenses/lr_tuning.csv`; logreg, 2 seeds, mean validation AUC at epsilon 8 / no DP: lr 0.02 0.955 / 0.959, 0.1 0.955 / 0.964, 0.5 0.941 / 0.966) makes 0.1 the best at epsilon 8 and within 0.002 of the best without DP, so it is a compromise, not a clear winner. 
 
 DP: each client clips every per-sample gradient to norm 1.0, adds Gaussian noise, and calibrates its noise multiplier (Opacus RDP accountant) so that its whole run costs (epsilon, delta = 1e-5), i.e. record-level DP per site (`utils/dp.py`). The DP runs use the model after the last round with no early stopping, because choosing a round on validation data would spend extra privacy budget. Batches are fixed-size draws while the accountant assumes Poisson sampling (the usual approximation). Secure aggregation is simulated: every pair of clients shares a random mask that one adds and the other subtracts, so the masks cancel in the (FedAvg-weighted) sum and the server only learns the aggregate.
 
@@ -267,11 +291,20 @@ Membership inference (pooled attack AUC, 0.5 = guessing; patients counted once; 
 | Secure aggregation | 0.501 / 0.511 | 0.508 / 0.502 |
 
 What it shows:
-- Without a defense, a server that sees individual updates recovers a batch-size-1 patient exactly (both models). Larger batches blur it: logistic regression stays near chance, the MLP leaks partially.
+- Without a defense, a server that sees individual updates recovers a batch-size-1 patient exactly (both models). This is a worst case, not a typical one: one SGD step on one sample, plain updates. Larger batches blur it (logistic regression near chance, the MLP partial), and updates from several local steps or a full epoch (the Part 1 protocol) were not attacked, so read 1.000 as an upper bound on what this attack achieves, and the batch 2-8 numbers as lower bounds (fixed optimizer budget).
 - DP removes that inversion at every epsilon tested and costs almost nothing in AUC down to epsilon 3; epsilon 1 hurts, the MLP most. The same epsilon is the same per-site guarantee for the inversion runs (batch 1) and the performance runs (batch 32), not the same noise per step.
-- Secure aggregation hides individual updates (inversion on a masked update falls to chance) at no utility cost, but the aggregate of four clients still leaks partially for the MLP.
-- On this SGD protocol membership leakage is already near chance without a defense, so no defense shows a measurable effect; do not read the logistic regression epsilon 8 value (0.568) as DP increasing leakage. On the Adam baseline protocol the update-gain attack is modestly above chance at the early-stopped round (pooled 0.568 logistic regression / 0.587 MLP) and secure aggregation brings it to 0.487 / 0.513 (`results/defenses/secagg_membership.csv`). The global-loss attack is at chance everywhere, with or without defenses.
+- Secure aggregation hides individual updates at no utility cost. The masked-update result (cosine about 0) is true by construction (mask std 1.0 against updates of about 0.01), so it is not evidence about the attack. The informative number is the aggregate: four clients with one sample each still leak partially for the MLP (0.63; logistic regression 0.25).
+- AUC near 0.5 means no evidence of membership leakage under these two simple loss-threshold attacks, not proof that none exists (stronger attacks such as shadow models were not run). On this SGD protocol the attack is already near chance without a defense, so no defense shows a measurable effect; do not read the logistic regression epsilon 8 value (0.568) as DP increasing leakage. On the Adam baseline protocol the update-gain attack is modestly above chance at the early-stopped round (pooled 0.568 logistic regression / 0.587 MLP) and secure aggregation brings it to 0.487 / 0.513 (`results/defenses/secagg_membership.csv`). The global-loss attack is at chance everywhere, with or without defenses.
 - The privacy-utility figure is `results/figures/privacy_utility.png`.
+
+## Limitations
+
+- One dataset, one data split (seed 4171), four simulated hospitals, a 140-sample test set (the smallest node has 10 test samples). Seeds vary initialisation and batch order only; the intervals above cover test-set sampling, not a different split.
+- Part 1 (Adam, early stopping on validation) and Part 2 (plain SGD, fixed 50 rounds) use different protocols; do not compare numbers across them.
+- Attacks are basic: closed form and gradient matching on single SGD steps, and two loss-threshold membership scores. Results are best-case for the attacker in the first (batch 1, plaintext) and weak in the second; neither is a bound on what a stronger attacker could do.
+- Secure aggregation is simulated by additive masks; the real protocol (key agreement, dropout handling) is not implemented.
+- DP uses fixed-size batches with a Poisson-sampling accountant, and the inversion runs (batch 1) and utility runs (batch 32) share epsilon but not noise per step.
+- Gene selection used the variance of all 700 samples (label-free); the full list of data decisions is in `DATA_NOTES.txt`.
 
 ## Research referenced
 
