@@ -99,12 +99,12 @@ python -m defenses.run_secagg && python -m defenses.plot_tradeoff
   and `run_inversion --epsilons` do the same for inversion under DP (batch size 1 only -> `inversion_dp.csv`).
 - `defenses/` — `utils/dp.py` (client DP-SGD with Opacus: per-sample clip 1.0, Gaussian noise, noise multiplier calibrated per
   client for (epsilon, delta = 1e-5) over the whole run with the RDP accountant; config `dp-epsilon` <= 0 = off, `dp-clip`,
-  `dp-delta`); `tune_lr.py` (lr grid on validation AUC -> `lr_tuning.csv`: 0.1 best at eps 8, within 0.002 of best without DP, so a compromise; writes to `lr_tuning/`); `run_dp.py` (utility sweep, SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf,
+  `dp-delta`); `tune_lr.py` (lr grid on validation AUC -> `lr_tuning.csv`: 0.1 ties 0.02 at eps 8 and is within 0.002 of the best without DP, so a compromise; tuning on validation is not charged to epsilon; writes to `lr_tuning/`); `run_dp.py` (utility sweep, SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf,
   5 seeds, also saves the captures -> `results/defenses/dp_utility.csv`); `run_dp_membership.py`; `run_secagg.py` (pairwise-masked
   secure aggregation simulation + attacks on a masked update and on the aggregate -> `secagg.csv`; membership under masking, on the Adam and the SGD captures -> `secagg_membership.csv`; needs the batch-size-1 captures, the `--membership` captures and `defenses.run_dp`); `plot_tradeoff.py` ->
   `results/figures/privacy_utility.png` + table.
 - `tests/test_core.py` — pytest: closed form exact at B=1, masks cancel, no patient in two splits (`python -m pytest tests`).
-- Run tags omit lr and rounds; `federated/server_app.py` now writes `<tag>.json` (lr, weight decay, rounds, clip, delta) beside each round log and `check_run_config` lets readers fail on a mismatch (older files have none).
+- Run tags omit lr and rounds; `federated/server_app.py` now writes `<tag>.json` (lr, weight decay, rounds, clip, delta) beside each round log and `check_run_config` lets readers fail on a mismatch (used by uncertainty, run_inversion, run_membership, run_secagg; captures also get a sidecar, and older captures are checked from their stored lr and rounds; older round logs have no sidecar and are skipped).
 - `utils/uncertainty.py` — paired bootstrap of AUC differences over test patients; FedAvg predictions rebuilt from the captures (checked against logged test AUC); centralized predictions saved by `centralized.run`.
 - `data/` — raw study, GENCODE reference and `processed/` outputs (all gitignored).
 
@@ -138,8 +138,8 @@ reads the `data/processed/` CSVs and gives the same split as `load_cll` + `make_
   OTHER has only 10 test samples. These are the numbers FedAvg has to be compared against.
 - Federated baseline done (`federated/`, FedAvg, 4 nodes, Adam, 1 local epoch, same hyperparameters and
   seeds as centralized). Pooled test AUC: logreg 0.954 ± 0.010, MLP 0.963 ± 0.005 (centralized 0.975 /
-  0.977); per-node AUCs match centralized closely. Most of the pooled gap is local standardization, not
-  federation: centralized trained with local scaling (`centralized.run --scaling local`) gets logreg 0.965 / MLP 0.960. Paired bootstrap (`utils.uncertainty`, `results/uncertainty.csv`): FedAvg minus centralized-local is -0.011 [-0.023, 0.000] / +0.002 [-0.006, 0.011]; minus pooled-scaling centralized -0.020 [-0.045, 0.000] / -0.014 [-0.030, -0.002]. DP eps 3 and 8 vs no DP: not distinguishable from 0; eps 1 clearly worse (-0.023 / -0.072).
+  0.977); per-node AUCs match centralized closely. Part of the pooled gap is local standardization, not
+  federation (about half for logreg, nearly all for the MLP; centralized local-vs-pooled is -0.010 [-0.035, 0.011] for logreg): centralized trained with local scaling (`centralized.run --scaling local`) gets logreg 0.965 / MLP 0.960. Paired bootstrap (`utils.uncertainty`, `results/uncertainty.csv`): FedAvg minus centralized-local is -0.011 [-0.023, 0.000] / +0.002 [-0.006, 0.011]; minus pooled-scaling centralized -0.020 [-0.045, 0.000] / -0.014 [-0.030, -0.002]. DP eps 3 and 8 vs no DP: not distinguishable from 0; eps 1 clearly worse (-0.023 / -0.072).
 - Convergence plot done (`utils/plot_convergence.py`): FedAvg learns more slowly (logreg reaches test AUC
   0.95 after ~17 rounds vs ~6 epochs) and plateaus 0.01-0.02 below centralized.
 - Project scaffold created: `models/`, `centralized/`, `federated/` (renamed from `fl/`), plus

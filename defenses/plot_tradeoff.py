@@ -61,7 +61,7 @@ def main():
                         color=COLOR[m], lw=2.5, ms=9, capsize=4, label=label)
         ax2[1].plot([X[e] for e in i.epsilon], i["cosine"], marker="o" if m == "logreg" else "s",
                     color=COLOR[m], lw=2.5, ms=9)
-    ax2[0].set(title="Accuracy (AUC)", ylabel="test AUC")
+    ax2[0].set(title="Utility: test AUC", ylabel="test AUC")
     ax2[1].set(title="Exact attack (cosine)", ylabel="cosine similarity")
     ax2[0].legend(loc="lower right", fontsize=15, frameon=False)
     for a in ax2:

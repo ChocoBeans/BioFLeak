@@ -4,7 +4,8 @@
 SGD, batch 32, 50 rounds, at epsilon 8 and no DP, 2 seeds, for each candidate learning rate. The
 choice uses only the clients' validation AUC after the last round (never test numbers). The per-round
 logs go to results/defenses/lr_tuning/ because run tags do not contain the learning rate and would
-otherwise overwrite the real runs. The grid chose 0.1 (the default in defenses/run_dp.py).
+otherwise overwrite the real runs. The grid picked 0.1 (the default in defenses/run_dp.py): it ties 0.02 at epsilon 8 and is within
+0.002 of the best without DP, so it is a compromise. This tuning is not charged to epsilon.
 """
 import argparse
 

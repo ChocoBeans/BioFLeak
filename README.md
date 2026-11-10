@@ -184,7 +184,7 @@ Pooled test set (140 samples, mean ± std over 5 seeds):
 | MLP | centralized | 0.977 ± 0.002 | 0.920 ± 0.013 | 0.921 ± 0.014 |
 | MLP | FedAvg | 0.963 ± 0.005 | 0.921 ± 0.020 | 0.925 ± 0.019 |
 
-Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Most of the lower pooled AUC comes from local standardization, not from federation: the centralized models trained with local scaling (`python -m centralized.run --scaling local` -> `results/centralized_local/`) get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
+Per-node AUC is nearly the same as centralized (DFCI ≈ 0.99, ICGC ≈ 0.998, GCLLSG ≈ 0.91, OTHER has only 10 test samples). Part of the lower pooled AUC comes from local standardization, not from federation (about half of the gap for logistic regression, nearly all of it for the MLP, by the point estimates): the centralized models trained with local scaling (`python -m centralized.run --scaling local` -> `results/centralized_local/`) get 0.965 (logistic regression) and 0.960 (MLP). Scores from differently scaled nodes are less comparable across nodes, which hurts the pooled AUC but not the per-node AUC.
 
 ## Convergence plot
 
@@ -212,7 +212,7 @@ The 140-sample test set gives an AUC standard error of about 0.017 at AUC 0.96 (
 | DP epsilon 3 vs no DP (SGD) | -0.006 [-0.017, 0.002] | 0.000 [-0.010, 0.012] |
 | DP epsilon 1 vs no DP (SGD) | -0.023 [-0.038, -0.010] | -0.072 [-0.098, -0.048] |
 
-Reading it: FedAvg is 0.01-0.02 AUC below centralized, but once the centralized run uses local scaling the remaining difference is not distinguishable from zero for either model. DP at epsilon 3-8 is indistinguishable from no DP; epsilon 1 is a real loss.
+Reading it: FedAvg is 0.01-0.02 AUC below centralized. Local scaling accounts for part of that (the centralized local-vs-pooled difference is itself -0.010 [-0.035, 0.011] for logistic regression), and once the centralized run uses local scaling the remaining difference is not distinguishable from zero for either model. These are 12 intervals with no multiplicity correction, so treat borderline ones (upper end at 0.000) as suggestive. DP at epsilon 3-8 is indistinguishable from no DP; epsilon 1 is a real loss.
 
 ## Running the attacks
 
@@ -251,7 +251,7 @@ python -m defenses.plot_tradeoff     # -> results/figures/privacy_utility.png an
 
 Order that works from scratch: `utils.preprocess`, `centralized.run`, `federated.run`, `attacks.run_capture`, `attacks.run_inversion`, `attacks.run_capture --membership`, `attacks.run_membership`, `defenses.run_dp`, `defenses.run_dp_membership`, the DP inversion pair above, `defenses.run_secagg`, `defenses.plot_tradeoff`.
 
-The learning-rate grid (`defenses.tune_lr`, `results/defenses/lr_tuning.csv`; logreg, 2 seeds, mean validation AUC at epsilon 8 / no DP: lr 0.02 0.955 / 0.959, 0.1 0.955 / 0.964, 0.5 0.941 / 0.966) makes 0.1 the best at epsilon 8 and within 0.002 of the best without DP, so it is a compromise, not a clear winner. 
+The learning-rate grid (`defenses.tune_lr`, `results/defenses/lr_tuning.csv`; logreg, 2 seeds, mean validation AUC at epsilon 8 / no DP: lr 0.02 0.955 / 0.959, 0.1 0.955 / 0.964, 0.5 0.941 / 0.966) ties 0.02 at epsilon 8 and is within 0.002 of the best without DP, so 0.1 is a compromise, not a clear winner. Tuning on validation data is not charged to epsilon, so the reported guarantee covers the training runs, not the choice of learning rate. 
 
 DP: each client clips every per-sample gradient to norm 1.0, adds Gaussian noise, and calibrates its noise multiplier (Opacus RDP accountant) so that its whole run costs (epsilon, delta = 1e-5), i.e. record-level DP per site (`utils/dp.py`). The DP runs use the model after the last round with no early stopping, because choosing a round on validation data would spend extra privacy budget. Batches are fixed-size draws while the accountant assumes Poisson sampling (the usual approximation). Secure aggregation is simulated: every pair of clients shares a random mask that one adds and the other subtracts, so the masks cancel in the (FedAvg-weighted) sum and the server only learns the aggregate.
 
@@ -300,6 +300,7 @@ What it shows:
 ## Limitations
 
 - One dataset, one data split (seed 4171), four simulated hospitals, a 140-sample test set (the smallest node has 10 test samples). Seeds vary initialisation and batch order only; the intervals above cover test-set sampling, not a different split.
+- No lockfile: the pinned Flower range and the tested-versions list in `CLAUDE.md` are the reproducibility record.
 - Part 1 (Adam, early stopping on validation) and Part 2 (plain SGD, fixed 50 rounds) use different protocols; do not compare numbers across them.
 - Attacks are basic: closed form and gradient matching on single SGD steps, and two loss-threshold membership scores. Results are best-case for the attacker in the first (batch 1, plaintext) and weak in the second; neither is a bound on what a stronger attacker could do.
 - Secure aggregation is simulated by additive masks; the real protocol (key agreement, dropout handling) is not implemented.
