@@ -1,15 +1,15 @@
 """Score the membership-inference attack on captured runs.
 
-`python -m attacks.run_membership` scores the baseline protocol (`python -m attacks.run_capture
---membership` first); `defenses/run_dp_membership.py` reuses `membership_table` for the DP runs.
+Library module (no command of its own): `membership_table` is called by `defenses/run_dp_membership.py`
+for the SGD 50-round runs (no DP and DP) and by `defenses/run_secagg.py` for the masked captures.
 
 Members of node k = its training patients; non-members = the patients of node k's validation and test
 sets (never trained on). Each candidate is scored in node k's locally standardized space. Attacked
-models: the round chosen by early stopping (as in the federated baseline) and the last round (200,
-trained longer so more overfit). The score of each patient is averaged over the seeds before the AUC
+model: the global model after the last round (50 for the SGD runs; a setting can also ask for the round
+chosen by early stopping, which the Adam baseline used). The score of each patient is averaged over the seeds before the AUC
 is taken, with a bootstrap 95% interval over patients; per-seed AUCs give the seed spread.
 
-Output: results/attacks/membership.csv and a summary table.
+Output: a DataFrame; the callers write results/defenses/dp_membership.csv and secagg_membership.csv.
 """
 from pathlib import Path
 
@@ -100,15 +100,3 @@ def membership_table(settings, models=MODELS, seeds=SEEDS):
                                  "node": "all", "n_members": int(m.sum()), "n_nonmembers": int((~m).sum()),
                                  "auc_of_seed_mean_score": attack_auc(s[m], s[~m]), "ci_low": lo, "ci_high": hi})
     return pd.DataFrame(rows)
-
-
-def main():
-    settings = [{"name": "adam_baseline", "cfg": {}, "capture_dir": OUT / "captures",
-                 "rounds_dir": OUT / "rounds", "which": ("selected", "last")}]
-    df = membership_table(settings)
-    df.to_csv(OUT / "membership.csv", index=False)
-    print(df.round(3).to_string(index=False))
-
-
-if __name__ == "__main__":
-    main()

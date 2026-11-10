@@ -6,9 +6,9 @@ batch at the global model), which is what the gradient-inversion attack reads. T
 larger than the baseline's (0.1 instead of 1e-3) so the model actually trains in the few steps a round
 allows.
 
-`python -m attacks.run_capture --membership` instead records the standard baseline protocol (Adam,
-1 local epoch, batch 32, 200 rounds, 5 seeds), the setting whose trained models the membership
-inference attack targets.
+`python -m attacks.run_capture --baseline` instead records the Part 1 baseline protocol (Adam, 1 local
+epoch, batch 32, 200 rounds, 5 seeds). Nothing is attacked there: `utils.uncertainty` rebuilds the FedAvg
+test predictions from these captures for the paired bootstrap of Part 1.
 """
 import argparse
 
@@ -30,10 +30,10 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=0.1)
     parser.add_argument("--dp-epsilons", type=float, nargs="*", default=[],
                         help="also capture the batch-size-1 runs with DP-SGD at these epsilons")
-    parser.add_argument("--membership", action="store_true",
-                        help="capture the baseline Adam protocol instead (for membership inference)")
+    parser.add_argument("--baseline", action="store_true",
+                        help="capture the Part 1 Adam baseline instead (read by utils.uncertainty, not attacked)")
     args = parser.parse_args()
-    if args.membership:
+    if args.baseline:
         for model in args.models:
             for seed in range(5):
                 cfg = {"model": model, "seed": seed, "capture": True,  # other keys: baseline defaults

@@ -14,8 +14,8 @@ The server therefore has two things to attack, both tested on the batch-size-1 c
 Secure aggregation leaves the global model unchanged, so utility is unchanged by construction; the check
 below confirms the masks cancel.
 
-Membership inference is tested on both the Adam-baseline captures (`python -m attacks.run_capture --membership`)
-and the SGD 50-round captures of the DP sweep (`python -m defenses.run_dp`, epsilon = inf):
+Membership inference is tested on the SGD 50-round captures of the DP sweep (`python -m defenses.run_dp`,
+epsilon = inf):
 clients mask their FedAvg-weighted update (w_k * delta_k + mask_k, masks sum to zero), the server's
 aggregate is exact, and the update-gain attack, which needs each client's local model, has only the masked
 update to work with (the attacker divides by the known weight w_k and adds it to the global model). The
@@ -23,7 +23,7 @@ global-loss attack uses only the global model and should be unchanged; both are 
 unmasked run. Output: results/defenses/secagg_membership.csv.
 
 `python -m defenses.run_secagg` -> results/defenses/secagg.csv, secagg_membership.csv and summary tables
-(needs both the batch-size-1 captures and the `--membership` captures).
+(needs the batch-size-1 captures and the `defenses.run_dp` captures).
 """
 import argparse
 
@@ -76,12 +76,10 @@ def masked_membership_captures(src, cfg, seeds=range(5), models=("logreg", "mlp"
 
 
 def membership_under_secagg():
-    """Update-gain and global-loss attacks, plain vs masked, on both training protocols: the Adam
-    baseline (selected and last round) and the SGD 50-round runs the DP results use (epsilon = inf)."""
-    from attacks.run_membership import OUT as ATTACKS, membership_table
+    """Update-gain and global-loss attacks, plain vs masked, on the SGD 50-round runs the DP results use
+    (epsilon = inf)."""
+    from attacks.run_membership import membership_table
     protocols = {
-        "adam": {"cfg": {}, "src": ATTACKS / "captures", "rounds_dir": ATTACKS / "rounds",
-                 "which": ("selected", "last")},
         "sgd": {"cfg": {"optimizer": "sgd", "learning-rate": 0.1, "num-server-rounds": 50, "dp-epsilon": 0.0},
                 "src": OUT / "captures", "rounds_dir": OUT / "rounds", "which": ("last",)}}
     settings = []
