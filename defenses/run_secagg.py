@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from attacks.inversion import closed_form, gradient_matching, matched_cosine
-from federated.server_app import DEFAULTS, run_tag
+from federated.server_app import DEFAULTS, check_run_config, run_tag
 from utils.dataset import load_processed
 from utils.preprocess import ROOT
 from utils.standardization import standardize_local
@@ -82,7 +82,7 @@ def membership_under_secagg():
     protocols = {
         "adam": {"cfg": {}, "src": ATTACKS / "captures", "rounds_dir": ATTACKS / "rounds",
                  "which": ("selected", "last")},
-        "sgd": {"cfg": {"optimizer": "sgd", "num-server-rounds": 50, "dp-epsilon": 0.0},
+        "sgd": {"cfg": {"optimizer": "sgd", "learning-rate": 0.1, "num-server-rounds": 50, "dp-epsilon": 0.0},
                 "src": OUT / "captures", "rounds_dir": OUT / "rounds", "which": ("last",)}}
     settings = []
     for name, p in protocols.items():
@@ -114,6 +114,7 @@ def main():
     for model in args.models:
         for seed in args.seeds:
             cfg = {**DEFAULTS, "model": model, "seed": seed, "optimizer": "sgd", "local-steps": 1, "batch-size": 1}
+            check_run_config(CAPTURES / f"{run_tag(cfg)}.npz", **{"learning-rate": 0.1})  # run_capture default
             cap = np.load(CAPTURES / f"{run_tag(cfg)}.npz")
             lr, rng = float(cap["lr"]), np.random.default_rng(seed)
             for rnd in args.rounds:

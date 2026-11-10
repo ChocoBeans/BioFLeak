@@ -15,7 +15,7 @@ EPSILONS = (1.0, 3.0, 8.0, float("inf"))
 
 
 def main():
-    settings = [{"name": f"eps={e:g}", "cfg": {"optimizer": "sgd", "num-server-rounds": 50,
+    settings = [{"name": f"eps={e:g}", "cfg": {"optimizer": "sgd", "learning-rate": 0.1, "num-server-rounds": 50,
                                                "dp-epsilon": 0.0 if e == float("inf") else e},
                  "capture_dir": OUT / "captures", "rounds_dir": OUT / "rounds", "which": ("last",)}
                 for e in EPSILONS]

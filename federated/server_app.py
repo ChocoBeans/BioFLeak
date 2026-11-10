@@ -7,11 +7,13 @@ round from the client-side validation AUC, never from the test numbers.
 """
 import sys
 import json
+import math
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # utils/ and models/ live at the repo root
 
+import numpy as np
 import pandas as pd
 import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
@@ -42,20 +44,27 @@ def run_tag(cfg):
 SIDECAR_KEYS = ("learning-rate", "weight-decay", "num-server-rounds", "dp-clip", "dp-delta")  # not in run_tag
 
 
-def check_run_config(csv_path, **expected):
-    """Fail if a run's sidecar (<tag>.json, written next to the log) disagrees with `expected`.
+def check_run_config(path, **expected):
+    """Fail if a run's recorded settings disagree with `expected` (e.g. learning-rate, num-server-rounds).
 
     Run tags omit the learning rate and the round budget, so a rerun with other settings overwrites
-    the same file name; readers call this to catch a mismatch. Runs from before the sidecar existed
-    have none and are skipped.
+    the same file name. Settings come from the sidecar `<tag>.json` next to the file; for a capture
+    (.npz) from before sidecars existed they are read from the file itself (it stores lr and rounds).
+    Anything else without a sidecar is skipped.
     """
-    sidecar = Path(csv_path).with_suffix(".json")
-    if not sidecar.exists():
+    path = Path(path)
+    sidecar = path.with_suffix(".json")
+    if sidecar.exists():
+        saved = json.loads(sidecar.read_text())
+    elif path.suffix == ".npz":
+        d = np.load(path)
+        saved = {"learning-rate": float(d["lr"]), "num-server-rounds": len(d["rounds"])}
+    else:
         return
-    saved = json.loads(sidecar.read_text())
-    bad = {k: (saved.get(k), v) for k, v in expected.items() if saved.get(k) != v}
+    same = lambda a, b: math.isclose(a, b, rel_tol=1e-9) if isinstance(a, float) or isinstance(b, float) else a == b
+    bad = {k: (saved.get(k), v) for k, v in expected.items() if k in saved and not same(saved[k], v)}
     if bad:
-        raise ValueError(f"{sidecar.name}: settings differ from what the reader expects (saved, expected): {bad}")
+        raise ValueError(f"{path.name}: settings differ from what the reader expects (saved, expected): {bad}")
 
 
 def run_fedavg(grid: Grid, cfg: dict) -> None:
@@ -92,6 +101,8 @@ def run_fedavg(grid: Grid, cfg: dict) -> None:
 
     if cfg["capture"]:
         strategy.save(Path(cfg["capture-dir"]) / f"{run_tag(cfg)}.npz", lr=cfg["learning-rate"])
+        Path(cfg["capture-dir"]).joinpath(f"{run_tag(cfg)}.json").write_text(
+            json.dumps({k: cfg[k] for k in SIDECAR_KEYS}))
     rows = []
     for r in range(1, cfg["num-server-rounds"] + 1):
         row = {"round": r}

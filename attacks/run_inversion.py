@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from attacks.inversion import closed_form, gradient_matching, infer_label, matched_cosine
-from federated.server_app import run_tag
+from federated.server_app import check_run_config, run_tag
 from utils.dataset import load_processed
 from utils.preprocess import ROOT
 from utils.standardization import standardize_local
@@ -44,6 +44,7 @@ def main():
             for seed in args.seeds:
                 cfg = {"model": model, "seed": seed, "optimizer": "sgd", "local-epochs": 1,
                        "local-steps": 1, "batch-size": batch, "dp-epsilon": eps}
+                check_run_config(OUT / "captures" / f"{run_tag(cfg)}.npz", **{"learning-rate": 0.1})  # run_capture default
                 cap = np.load(OUT / "captures" / f"{run_tag(cfg)}.npz")
                 lr = float(cap["lr"])
                 rng = np.random.default_rng(seed)

@@ -45,3 +45,14 @@ def test_no_patient_in_two_splits():
     sets = [set(test_ids)] + [set(ids) for d in nodes.values() for ids in d.values()]
     sizes = [len(s) for s in sets]
     assert len(set().union(*sets)) == sum(sizes), "a patient appears in more than one split or node"
+
+
+def test_check_run_config_catches_a_different_learning_rate(tmp_path):
+    from federated.server_app import check_run_config
+    path = tmp_path / "run.npz"
+    np.savez(path, lr=0.1, rounds=np.arange(1, 51))
+    check_run_config(path, **{"learning-rate": 0.1, "num-server-rounds": 50})
+    with pytest.raises(ValueError):
+        check_run_config(path, **{"learning-rate": 0.5})
+    with pytest.raises(ValueError):
+        check_run_config(path, **{"num-server-rounds": 100})

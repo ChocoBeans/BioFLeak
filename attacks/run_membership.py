@@ -18,7 +18,7 @@ import pandas as pd
 
 from attacks.membership import (attack_auc, bootstrap_ci, model_from_vector, per_patient,
                                 sample_loss)
-from federated.server_app import DEFAULTS, run_tag
+from federated.server_app import DEFAULTS, check_run_config, run_tag
 from utils.dataset import load_patients, load_processed
 from utils.preprocess import ROOT
 from utils.standardization import standardize_local
@@ -56,6 +56,8 @@ def membership_table(settings, models=MODELS, seeds=SEEDS):
         for model_name in models:
             for seed in seeds:
                 cfg = {**DEFAULTS, **st["cfg"], "model": model_name, "seed": seed}
+                check_run_config(Path(st["capture_dir"]) / f"{run_tag(cfg)}.npz", **{
+                    k: cfg[k] for k in ("learning-rate", "num-server-rounds")})
                 cap = np.load(Path(st["capture_dir"]) / f"{run_tag(cfg)}.npz")
                 val_auc = pd.read_csv(Path(st["rounds_dir"]) / f"{run_tag(cfg)}.csv")["val_auc"]
                 chosen = {"selected": select_best(val_auc.tolist()), "last": int(cap["rounds"][-1])}
