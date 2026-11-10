@@ -50,6 +50,28 @@ def main():
     fig.tight_layout()
     FIG.mkdir(parents=True, exist_ok=True)
     fig.savefig(FIG / "privacy_utility.png", dpi=150)
+
+    # slide version: two panels, large type (membership is near chance everywhere and goes in the slide text)
+    plt.rcParams.update({"font.size": 17})
+    fig2, ax2 = plt.subplots(1, 2, figsize=(10, 4.6))
+    for m in ("logreg", "mlp"):
+        u, i = (t[t.model == m].sort_values("epsilon") for t in (util, inv))
+        label = {"logreg": "Logistic regression", "mlp": "MLP"}[m]
+        ax2[0].errorbar([X[e] for e in u.epsilon], u["mean"], u["std"], marker="o" if m == "logreg" else "s",
+                        color=COLOR[m], lw=2.5, ms=9, capsize=4, label=label)
+        ax2[1].plot([X[e] for e in i.epsilon], i["cosine"], marker="o" if m == "logreg" else "s",
+                    color=COLOR[m], lw=2.5, ms=9)
+    ax2[0].set(title="Accuracy (AUC)", ylabel="test AUC")
+    ax2[1].set(title="Exact attack (cosine)", ylabel="cosine similarity")
+    ax2[0].legend(loc="lower right", fontsize=15, frameon=False)
+    for a in ax2:
+        a.set_xticks(range(4), ["1", "3", "8", "\u221e"])
+        a.set_xlabel("\u03b5 (smaller = more private)")
+        a.grid(alpha=0.3)
+        for side in ("top", "right"):
+            a.spines[side].set_visible(False)
+    fig2.tight_layout()
+    fig2.savefig(FIG / "privacy_utility_slides.png", dpi=200)
     table = (util.rename(columns={"mean": "test_auc", "std": "test_auc_std"})
              .merge(inv.rename(columns={"cosine": "inversion_cosine"}), on=["model", "epsilon"])
              .merge(mem[["model", "epsilon", "auc_of_seed_mean_score"]]
