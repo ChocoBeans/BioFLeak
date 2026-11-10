@@ -73,7 +73,7 @@ Keep the model simple (logistic regression / small MLP) so the threat-model atta
 - [x] Per-client update access on the server for the attacks (SGD, 1 local step, small batches): `federated/capture_strategy.py`, `python -m attacks.run_capture`
 - [x] Gradient inversion (`python -m attacks.run_inversion`); exact at batch size 1 (cosine 1.000), near chance for logistic regression at batch size 2-8, partial for the MLP (0.54-0.68)
 - [x] Membership inference (`python -m attacks.run_capture --membership`, `python -m attacks.run_membership`): global-model loss attack at chance (AUC 0.50); per-node update-gain attack modest (pooled 0.57-0.59 at the early-stopped round)
-- [ ] DP and secure aggregation
+- [x] DP (`python -m defenses.run_dp`, `defenses.run_dp_membership`, `attacks.run_inversion --epsilons`) and simulated secure aggregation (`defenses.run_secagg`); trade-off plot `python -m defenses.plot_tradeoff`: DP is nearly free down to epsilon 3 for logistic regression, removes batch-1 inversion at every epsilon tested (1, 3, 8); secure aggregation hides individual updates (inversion and the update-gain membership attack fall to chance) but the 4-client aggregate still leaks partially for the MLP
 - [ ] Frame for week 7 proposal: two research questions — (1) does FL match centralized performance for cancer classification across institutional silos, and (2) how much raw patient data leaks from FL updates, and what's the cost of closing that leak
 
 ## Project layout
@@ -102,6 +102,7 @@ BioFLeak/
 │   ├── capture_strategy.py  # CaptureFedAvg: records each client's update for the attacks
 │   └── pyproject.toml, LICENSE  # dependency list from the Flower example
 ├── attacks/     # run_capture.py (record client updates), inversion.py + run_inversion.py (gradient inversion), membership.py + run_membership.py (membership inference)
+├── defenses/    # run_dp.py, run_dp_membership.py, run_secagg.py, plot_tradeoff.py (DP and secure aggregation)
 ├── results/     # metrics output (CSV, gitignored); centralized/ and federated/ subfolders
 ├── notebooks/   # exploratory analysis
 ├── DATA_NOTES.txt  # data selection and preprocessing decisions, with reasoning
@@ -171,7 +172,7 @@ source venv/bin/activate     # Flower's simulation needs the venv on PATH
 python -m federated.run      # run from the repo root
 ```
 
-Simulates FedAvg across the four nodes with Flower (`flwr.simulation.run_simulation`, in-process; `flwr run` is not used because it builds a separate environment for every run). Same models, Adam settings (learning rate 1e-3, weight decay 1e-4, batch size 32) and seeds as the centralized run, 1 local epoch per round, at most 200 rounds, and each client standardizes with its own training statistics. Validation stays at the clients: every round Flower averages the clients' validation metrics (weighted by node size), and the round is chosen by early stopping (patience 20) on that average validation AUC, never on test numbers. The shared test set is held by the server for evaluation only and scored each round, pooled and per node. Per-round curves are in `results/federated/rounds/`; the summary is in `results/federated/metrics.csv` (same columns as the centralized file, plus `best_round`, optimizer, local epochs and batch size). Options: `--optimizer adam|sgd`, `--local-epochs`, `--batch-size`, `--rounds`, `--seeds`, `--models`. A full run takes about 15 to 20 minutes.
+Simulates FedAvg across the four nodes with Flower (`flwr.simulation.run_simulation`, in-process; `flwr run` is not used because it builds a separate environment for every run). Same models, Adam settings (learning rate 1e-3, weight decay 1e-4, batch size 32) and seeds as the centralized run, 1 local epoch per round, at most 200 rounds, and each client standardizes with its own training statistics. Validation stays at the clients: every round Flower averages the clients' validation metrics (weighted by node size), and the round is chosen by early stopping (patience 20) on that average validation AUC, never on test numbers. The shared test set is held by the server for evaluation only and scored each round, pooled and per node. Per-round curves are in `results/federated/rounds/`; the summary is in `results/federated/metrics.csv` (same columns as the centralized file, plus `best_round`, optimizer, local epochs and batch size). Options: `--optimizer adam|sgd`, `--local-epochs`, `--batch-size`, `--learning-rate`, `--rounds`, `--seeds`, `--models`. A full run takes about 15 to 20 minutes.
 
 Pooled test set (140 samples, mean ± std over 5 seeds):
 
@@ -191,6 +192,86 @@ python -m utils.plot_convergence   # needs results/centralized/epochs/ and resul
 ```
 
 Writes `results/figures/convergence.png` (validation and test AUC against epochs for centralized and rounds for FedAvg, mean ± 1 std over 5 seeds, log-scale x-axis, test row zoomed to 0.90–1.0) and the plotted numbers in `results/figures/convergence_table.csv`. FedAvg needs more steps to learn (logistic regression reaches test AUC 0.95 after about 17 rounds versus 6 epochs centralized) and plateaus about 0.01 to 0.02 AUC lower. Validation AUC is not defined the same way in the two settings: pooled for centralized, the node-size-weighted mean of per-node AUCs for FedAvg.
+
+## Running the attacks
+
+Everything below runs from the repo root with the venv active, after `utils.preprocess` (the baselines are not needed). Each script writes to `results/` (gitignored).
+
+```bash
+# Gradient inversion: record every client's update (SGD, 1 mini-batch step per round, lr 0.1, 100 rounds),
+# then reconstruct the batches (closed form at batch size 1, gradient matching for larger batches)
+python -m attacks.run_capture      # logreg/mlp x batch size 1,2,4,8 x 3 seeds -> results/attacks/captures/*.npz
+python -m attacks.run_inversion    # -> results/attacks/inversion.csv, cosine similarity table
+
+# Membership inference: record the baseline Adam runs (5 seeds, 200 rounds), then attack
+python -m attacks.run_capture --membership   # about 10 minutes
+python -m attacks.run_membership             # -> results/attacks/membership.csv
+```
+
+`attacks/run_capture.py` launches the Flower simulations; `federated/capture_strategy.py` (`CaptureFedAvg`) is the honest-but-curious server that records each client's update inside them. The `run_inversion` and `run_membership` scripts only read those recordings. With one plain-SGD step an update is exactly `-lr * gradient`, so batch size 1 gives the closed form `x = grad_w / grad_b` (logistic regression) or `x = grad_W1[j] / grad_b1[j]` (MLP, any active hidden unit j). The true batches are recomputed from the seeded generators (`utils.train.batch_generator`) and are used only to score the attack.
+
+## Running the defenses
+
+```bash
+# Differential privacy (client-level DP-SGD with Opacus; SGD lr 0.1, batch 32, 50 rounds, epsilon 1/3/8/inf, 5 seeds)
+python -m defenses.run_dp            # about 25 minutes; utility -> results/defenses/dp_utility.csv; also saves the captures
+python -m defenses.run_dp_membership # membership attack on those captures -> results/defenses/dp_membership.csv
+python -m attacks.run_capture --batch-sizes --dp-epsilons 1 3 8 --rounds 50   # batch-size-1 DP captures
+python -m attacks.run_inversion --epsilons 0 1 3 8 --batch-sizes 1 --dlg-rounds 1 10 50   # -> results/attacks/inversion_dp.csv
+
+# Secure aggregation (simulated pairwise masks; needs the captures from attacks.run_capture,
+# attacks.run_capture --membership and defenses.run_dp)
+python -m defenses.run_secagg        # -> results/defenses/secagg.csv, secagg_membership.csv
+
+# Privacy-utility figure
+python -m defenses.plot_tradeoff     # -> results/figures/privacy_utility.png and privacy_utility_table.csv
+```
+
+Order that works from scratch: `utils.preprocess`, `centralized.run`, `federated.run`, `attacks.run_capture`, `attacks.run_inversion`, `attacks.run_capture --membership`, `attacks.run_membership`, `defenses.run_dp`, `defenses.run_dp_membership`, the DP inversion pair above, `defenses.run_secagg`, `defenses.plot_tradeoff`.
+
+DP: each client clips every per-sample gradient to norm 1.0, adds Gaussian noise, and calibrates its noise multiplier (Opacus RDP accountant) so that its whole run costs (epsilon, delta = 1e-5), i.e. record-level DP per site (`utils/dp.py`). The DP runs use the model after the last round with no early stopping, because choosing a round on validation data would spend extra privacy budget. Batches are fixed-size draws while the accountant assumes Poisson sampling (the usual approximation). Secure aggregation is simulated: every pair of clients shares a random mask that one adds and the other subtracts, so the masks cancel in the (FedAvg-weighted) sum and the server only learns the aggregate.
+
+## Results: federated learning with defenses (Part 2)
+
+Setting: FedAvg with plain SGD locally (learning rate 0.1, batch 32, 1 local epoch per round), 50 rounds, model after the last round, 5 seeds. This is a different local optimizer and round rule from the Adam runs of Part 1, so compare within this section. Pooled test set (140 samples).
+
+Performance (pooled test AUC / accuracy):
+
+| Setting | Logistic regression | MLP |
+|---|---|---|
+| No defense | 0.964 / 0.943 | 0.961 / 0.947 |
+| DP, epsilon = 8 | 0.959 / 0.954 | 0.962 / 0.939 |
+| DP, epsilon = 3 | 0.958 / 0.950 | 0.961 / 0.934 |
+| DP, epsilon = 1 | 0.941 / 0.889 | 0.889 / 0.823 (AUC std 0.076) |
+| Secure aggregation | same as no defense (masks cancel exactly, to 3e-15) | same |
+
+Gradient inversion (cosine similarity to the true patient's feature vector; chance is about 0; 3 seeds):
+
+| Setting | Attack | Logistic regression | MLP |
+|---|---|---|---|
+| No defense, batch 1 | Closed form | 1.000 | 1.000 |
+| No defense, batch 2 / 4 / 8 | Gradient matching | 0.18 / 0.26 / 0.22 | 0.68 / 0.58 / 0.54 |
+| DP epsilon 8 / 3 / 1, batch 1 | Closed form | 0.03 / 0.01 / 0.00 | 0.00 / 0.00 / 0.00 |
+| DP epsilon 8 / 3 / 1, batch 1 | Gradient matching | -0.01 / -0.01 / -0.02 | 0.03 / 0.02 / 0.00 |
+| Secure aggregation, one client's masked update | Closed form | -0.01 | -0.03 |
+| Secure aggregation, 4-client aggregate (one patient per client, FedAvg weights) | Gradient matching | 0.25 | 0.63 |
+
+Membership inference (pooled attack AUC, 0.5 = guessing; patients counted once; bootstrap 95% intervals are about +-0.04 to 0.05):
+
+| Setting | Global-loss attack (LR / MLP) | Update-gain attack (LR / MLP) |
+|---|---|---|
+| No defense | 0.501 / 0.511 | 0.521 / 0.534 |
+| DP, epsilon = 8 | 0.491 / 0.497 | 0.568 / 0.495 |
+| DP, epsilon = 3 | 0.491 / 0.497 | 0.552 / 0.468 |
+| DP, epsilon = 1 | 0.487 / 0.523 | 0.529 / 0.485 |
+| Secure aggregation | 0.501 / 0.511 | 0.508 / 0.502 |
+
+What it shows:
+- Without a defense, a server that sees individual updates recovers a batch-size-1 patient exactly (both models). Larger batches blur it: logistic regression stays near chance, the MLP leaks partially.
+- DP removes that inversion at every epsilon tested and costs almost nothing in AUC down to epsilon 3; epsilon 1 hurts, the MLP most. The same epsilon is the same per-site guarantee for the inversion runs (batch 1) and the performance runs (batch 32), not the same noise per step.
+- Secure aggregation hides individual updates (inversion on a masked update falls to chance) at no utility cost, but the aggregate of four clients still leaks partially for the MLP.
+- On this SGD protocol membership leakage is already near chance without a defense, so no defense shows a measurable effect; do not read the logistic regression epsilon 8 value (0.568) as DP increasing leakage. On the Adam baseline protocol the update-gain attack is modestly above chance at the early-stopped round (pooled 0.568 logistic regression / 0.587 MLP) and secure aggregation brings it to 0.487 / 0.513 (`results/defenses/secagg_membership.csv`). The global-loss attack is at chance everywhere, with or without defenses.
+- The privacy-utility figure is `results/figures/privacy_utility.png`.
 
 ## Research referenced
 

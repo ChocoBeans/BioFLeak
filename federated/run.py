@@ -5,8 +5,9 @@ seeds (Flower simulation, in-process), picks the round for each run from the cli
 validation AUC (early stopping with the same patience as centralized, never using test numbers),
 and writes results/federated/metrics.csv in the same columns as results/centralized/metrics.csv.
 
-Settings can be changed with --optimizer (adam | sgd), --local-epochs and --batch-size; the attack
-runs use --optimizer sgd --local-epochs 1 --batch-size 1..8.
+Settings can be changed with --optimizer (adam | sgd), --local-epochs, --batch-size and
+--learning-rate. The attack and defense runs do not use this script: they go through attacks/run_capture.py
+and defenses/run_dp.py, which add one-step local training, update capture and DP.
 """
 import argparse
 
